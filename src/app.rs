@@ -144,6 +144,13 @@ impl App {
             .render(area, buf);
     }
 
+    fn render_sub_header(area: Rect, buf: &mut Buffer) {
+        Paragraph::new("sub header")
+            .green()
+            .left_aligned()
+            .render(area, buf);
+    }
+
     fn render_footer(area: Rect, buf: &mut Buffer) {
         Paragraph::new("Use ↓↑ to move, g/G to go top/bottom, ENTER to select.")
             .centered()
@@ -191,7 +198,8 @@ impl Widget for &mut App {
     where
         Self: Sized,
     {
-        let [header_area, main_area, footer_area] = Layout::vertical([
+        let [header_area, sub_header_area, main_area, footer_area] = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Fill(1),
             Constraint::Length(1),
@@ -201,6 +209,7 @@ impl Widget for &mut App {
         let [list_area] = Layout::vertical([Constraint::Fill(1)]).areas(main_area);
 
         App::render_header(header_area, buf);
+        App::render_sub_header(sub_header_area, buf);
         App::render_footer(footer_area, buf);
 
         self.render_list(list_area, buf);
@@ -220,13 +229,13 @@ mod tests {
 
         let mut expected = Buffer::with_lines(vec![
             "                                    Tiny FE                                    ",
+            "sub header                                                                     ",
             "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
             "┃>Rewrite everything with Rust!                                               ┃",
             "┃ Rewrite all of your tui apps with Ratatui                                   ┃",
             "┃ Pet your cat                                                                ┃",
             "┃ Walk with your dog                                                          ┃",
             "┃ Pay the bills                                                               ┃",
-            "┃ Refactor list example                                                       ┃",
             "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
             "            Use ↓↑ to move, g/G to go top/bottom, ENTER to select.             ",
         ]);
@@ -234,17 +243,20 @@ mod tests {
         // Apply BOLD to the entire first line
         expected.set_style(Rect::new(0, 0, 79, 1), Style::new().bold());
 
-        // Clear BOLD at the beginning of the second line
-        expected.set_style(Rect::new(0, 1, 79, 1), Style::new());
+        // Clear BOLD at the beginning of the second line and make it green
+        expected.set_style(Rect::new(0, 1, 79, 1), Style::new().fg(Color::Green));
+
+        // Remove green from the next line
+        expected.set_style(Rect::new(0, 3, 79, 1), Style::new());
 
         // Apply DarkGray background to line 2 (index 2)
-        expected.set_style(Rect::new(1, 2, 77, 1), Style::new().bg(Color::DarkGray));
+        expected.set_style(Rect::new(1, 3, 77, 1), Style::new().bg(Color::DarkGray));
 
         // Clear background color at the end of the highlighted line
-        expected.set_style(Rect::new(78, 2, 1, 1), Style::new());
+        expected.set_style(Rect::new(78, 3, 1, 1), Style::new());
 
         // Reset style at the beginning of the third line
-        expected.set_style(Rect::new(0, 3, 79, 1), Style::new());
+        expected.set_style(Rect::new(0, 4, 79, 1), Style::new());
 
         assert_eq!(buffer, expected);
     }
