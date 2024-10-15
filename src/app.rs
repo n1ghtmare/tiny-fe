@@ -36,6 +36,13 @@ struct EntryList {
     state: ListState,
 }
 
+impl EntryList {
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.items.len()
+    }
+}
+
 impl FromIterator<&'static str> for EntryList {
     fn from_iter<I: IntoIterator<Item = &'static str>>(iter: I) -> Self {
         let items = iter.into_iter().map(EntryItem::new).collect();
@@ -195,5 +202,101 @@ impl Widget for &mut App {
         App::render_footer(footer_area, buf);
 
         self.render_list(list_area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render() {
+        let mut app = App::default();
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 10));
+
+        app.render(buffer.area, &mut buffer);
+
+        let mut expected = Buffer::with_lines(vec![
+            "                                    Tiny FE                                    ",
+            "┌─────────────────────────────────────────────────────────────────────────────┐",
+            "│>Rewrite everything with Rust!                                               │",
+            "│ Rewrite all of your tui apps with Ratatui                                   │",
+            "│ Pet your cat                                                                │",
+            "│ Walk with your dog                                                          │",
+            "│ Pay the bills                                                               │",
+            "│ Refactor list example                                                       │",
+            "└─────────────────────────────────────────────────────────────────────────────┘",
+            "            Use ↓↑ to move, g/G to go top/bottom, ENTER to select.             ",
+        ]);
+
+        // Apply BOLD to the entire first line
+        expected.set_style(Rect::new(0, 0, 79, 1), Style::new().bold());
+
+        // Clear BOLD at the beginning of the second line
+        expected.set_style(Rect::new(0, 1, 79, 1), Style::new());
+
+        // Apply DarkGray background to line 2 (index 2)
+        expected.set_style(Rect::new(1, 2, 77, 1), Style::new().bg(Color::DarkGray));
+
+        // Clear background color at the end of the highlighted line
+        expected.set_style(Rect::new(78, 2, 1, 1), Style::new());
+
+        // Reset style at the beginning of the third line
+        expected.set_style(Rect::new(0, 3, 79, 1), Style::new());
+
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn first_item_is_preselected_after_render() {
+        let mut app = App::default();
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 10));
+
+        assert_eq!(app.entry_list.state.selected(), None);
+
+        app.render(buffer.area, &mut buffer);
+
+        assert_eq!(app.entry_list.state.selected(), Some(0));
+    }
+
+    #[test]
+    fn handle_key_event() {
+        let mut app = App::default();
+
+        // Make sure we have 6 items
+        assert_eq!(app.entry_list.len(), 6);
+
+        app.handle_key_event(KeyCode::Char('q').into());
+        assert!(app.should_exit);
+
+        app.handle_key_event(KeyCode::Esc.into());
+        assert!(app.should_exit);
+
+        app.handle_key_event(KeyCode::Char('j').into());
+        assert_eq!(app.entry_list.state.selected(), Some(0));
+
+        app.handle_key_event(KeyCode::Down.into());
+        assert_eq!(app.entry_list.state.selected(), Some(1));
+
+        // press down so that we can go back up more than once
+        app.handle_key_event(KeyCode::Down.into());
+
+        app.handle_key_event(KeyCode::Char('k').into());
+        assert_eq!(app.entry_list.state.selected(), Some(1));
+
+        app.handle_key_event(KeyCode::Up.into());
+        assert_eq!(app.entry_list.state.selected(), Some(0));
+
+        app.handle_key_event(KeyCode::Char('G').into());
+        assert_eq!(app.entry_list.state.selected(), Some(usize::MAX));
+
+        app.handle_key_event(KeyCode::Char('g').into());
+        assert_eq!(app.entry_list.state.selected(), Some(0));
+
+        app.handle_key_event(KeyCode::End.into());
+        assert_eq!(app.entry_list.state.selected(), Some(usize::MAX));
+
+        app.handle_key_event(KeyCode::Home.into());
+        assert_eq!(app.entry_list.state.selected(), Some(0));
     }
 }
