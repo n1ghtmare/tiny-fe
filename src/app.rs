@@ -166,6 +166,11 @@ impl App {
             .highlight_symbol(">")
             .highlight_spacing(HighlightSpacing::Always);
 
+        // If no item is selected, preselect the first item
+        if self.entry_list.state.selected().is_none() {
+            self.entry_list.state.select_first();
+        }
+
         // We need to disambiguate this trait method as both `Widget` and `StatefulWidget` share
         // the same method name `render`.
         StatefulWidget::render(list, area, buf, &mut self.entry_list.state);
