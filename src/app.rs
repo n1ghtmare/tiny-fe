@@ -1,3 +1,5 @@
+use std::{env, path::PathBuf};
+
 use anyhow::Ok;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{prelude::*, widgets::*, DefaultTerminal};
@@ -9,14 +11,20 @@ pub struct App {
     /// A boolean used to signal if the app should exit
     should_exit: bool,
 
+    /// Current working directory
+    current_working_directory: PathBuf,
+
     // TODO: This should be the directory entries list
     entry_list: EntryList,
 }
 
 impl Default for App {
     fn default() -> Self {
+        let current_working_directory = env::current_dir().unwrap_or_default();
+
         Self {
             should_exit: false,
+            current_working_directory,
             // TODO: Default to the pwd
             entry_list: EntryList::from_iter([
                 "Rewrite everything with Rust!",
@@ -144,8 +152,10 @@ impl App {
             .render(area, buf);
     }
 
-    fn render_sub_header(area: Rect, buf: &mut Buffer) {
-        Paragraph::new("sub header")
+    fn render_sub_header(&mut self, area: Rect, buf: &mut Buffer) {
+        let title = self.current_working_directory.to_string_lossy();
+
+        Paragraph::new(title)
             .green()
             .left_aligned()
             .render(area, buf);
@@ -158,10 +168,7 @@ impl App {
     }
 
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
-        let block = Block::new()
-            // .title(Line::raw(" My List of items ").left_aligned())
-            .borders(Borders::ALL)
-            .border_set(border::THICK);
+        let block = Block::new().borders(Borders::ALL).border_set(border::THICK);
 
         // Iterate through all elements in the `items` and stylize them.
         let items: Vec<ListItem> = self
@@ -209,9 +216,9 @@ impl Widget for &mut App {
         let [list_area] = Layout::vertical([Constraint::Fill(1)]).areas(main_area);
 
         App::render_header(header_area, buf);
-        App::render_sub_header(sub_header_area, buf);
         App::render_footer(footer_area, buf);
 
+        self.render_sub_header(sub_header_area, buf);
         self.render_list(list_area, buf);
     }
 }
@@ -227,9 +234,11 @@ mod tests {
 
         app.render(buffer.area, &mut buffer);
 
+        let sub_header_text = app.current_working_directory.to_string_lossy();
+
         let mut expected = Buffer::with_lines(vec![
             "                                    Tiny FE                                    ",
-            "sub header                                                                     ",
+            sub_header_text.as_ref(),
             "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
             "┃>Rewrite everything with Rust!                                               ┃",
             "┃ Rewrite all of your tui apps with Ratatui                                   ┃",
