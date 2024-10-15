@@ -1,6 +1,7 @@
 use anyhow::Ok;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{prelude::*, widgets::*, DefaultTerminal};
+use symbols::border;
 
 /// The main application struct, will hold the state of the application.
 #[derive(Debug)]
@@ -152,7 +153,8 @@ impl App {
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new()
             // .title(Line::raw(" My List of items ").left_aligned())
-            .borders(Borders::ALL);
+            .borders(Borders::ALL)
+            .border_set(border::THICK);
 
         // Iterate through all elements in the `items` and stylize them.
         let items: Vec<ListItem> = self
@@ -218,14 +220,14 @@ mod tests {
 
         let mut expected = Buffer::with_lines(vec![
             "                                    Tiny FE                                    ",
-            "┌─────────────────────────────────────────────────────────────────────────────┐",
-            "│>Rewrite everything with Rust!                                               │",
-            "│ Rewrite all of your tui apps with Ratatui                                   │",
-            "│ Pet your cat                                                                │",
-            "│ Walk with your dog                                                          │",
-            "│ Pay the bills                                                               │",
-            "│ Refactor list example                                                       │",
-            "└─────────────────────────────────────────────────────────────────────────────┘",
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+            "┃>Rewrite everything with Rust!                                               ┃",
+            "┃ Rewrite all of your tui apps with Ratatui                                   ┃",
+            "┃ Pet your cat                                                                ┃",
+            "┃ Walk with your dog                                                          ┃",
+            "┃ Pay the bills                                                               ┃",
+            "┃ Refactor list example                                                       ┃",
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
             "            Use ↓↑ to move, g/G to go top/bottom, ENTER to select.             ",
         ]);
 
