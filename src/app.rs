@@ -218,16 +218,7 @@ impl App {
         // TODO: The items need to be ordered by type (file or directory) and then alphabetically.
 
         // Iterate through all elements in the `items` and stylize them.
-        let items: Vec<ListItem> = self
-            .entry_list
-            .items
-            .iter()
-            .enumerate()
-            .map(|(_, entry)| {
-                // let color = alternate_colors(i);
-                ListItem::from(entry)
-            })
-            .collect();
+        let items: Vec<ListItem> = self.entry_list.items.iter().map(ListItem::from).collect();
 
         // Create a List from all list items and highlight the currently selected one
         let list = List::new(items)
