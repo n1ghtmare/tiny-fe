@@ -7,7 +7,8 @@ fn main() -> anyhow::Result<()> {
     // Clear the terminal and store its current state
     terminal.clear()?;
 
-    let app_result = App::default().run(&mut terminal);
+    let mut app = App::try_new()?;
+    let app_result = app.run(&mut terminal);
 
     // Restore the state of the terminal before the app was opened
     ratatui::restore();

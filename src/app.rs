@@ -1,4 +1,8 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    fs::{DirEntry, ReadDir},
+    path::PathBuf,
+};
 
 use anyhow::Ok;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -14,34 +18,28 @@ pub struct App {
     /// Current working directory
     current_working_directory: PathBuf,
 
-    // TODO: This should be the directory entries list
+    /// A list representing the entries in the current working directory
     entry_list: EntryList,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        let current_working_directory = env::current_dir().unwrap_or_default();
+impl App {
+    pub fn try_new() -> anyhow::Result<Self> {
+        let current_working_directory = env::current_dir()?;
+        let entries = std::fs::read_dir(&current_working_directory)?;
 
-        Self {
+        let entry_list = EntryList::try_from(entries)?;
+
+        Ok(Self {
             should_exit: false,
             current_working_directory,
-            // TODO: Default to the pwd
-            entry_list: EntryList::from_iter([
-                "Rewrite everything with Rust!",
-                "Rewrite all of your tui apps with Ratatui",
-                "Pet your cat",
-                "Walk with your dog",
-                "Pay the bills",
-                "Refactor list example",
-            ]),
-        }
+            entry_list,
+        })
     }
 }
 
-// TODO: This should be the directory entries list and its state.
 #[derive(Debug, Default)]
 struct EntryList {
-    items: Vec<EntryItem>,
+    items: Vec<Entry>,
     state: ListState,
 }
 
@@ -52,31 +50,78 @@ impl EntryList {
     }
 }
 
-impl FromIterator<&'static str> for EntryList {
-    fn from_iter<I: IntoIterator<Item = &'static str>>(iter: I) -> Self {
-        let items = iter.into_iter().map(EntryItem::new).collect();
-        let state = ListState::default();
-        Self { items, state }
-    }
-}
+impl TryFrom<ReadDir> for EntryList {
+    type Error = anyhow::Error;
 
-// TODO: This should be the entry list item
-#[derive(Debug)]
-struct EntryItem {
-    title: String,
-}
+    fn try_from(value: ReadDir) -> Result<Self, Self::Error> {
+        let mut items = Vec::new();
 
-impl EntryItem {
-    fn new(todo: &str) -> Self {
-        Self {
-            title: todo.to_string(),
+        for dir_entry_result in value.into_iter() {
+            let dir_entry = dir_entry_result?;
+            let item = Entry::try_from(dir_entry)?;
+            items.push(item);
         }
+
+        Ok(EntryList {
+            items,
+            state: ListState::default(),
+        })
     }
 }
 
-impl From<&EntryItem> for ListItem<'_> {
-    fn from(value: &EntryItem) -> Self {
-        ListItem::new(value.title.to_owned())
+#[derive(Debug)]
+struct Entry {
+    path: PathBuf,
+    kind: EntryKind,
+}
+
+#[derive(Debug, PartialEq)]
+enum EntryKind {
+    File { extension: Option<String> },
+    Directory,
+}
+
+impl TryFrom<DirEntry> for Entry {
+    type Error = anyhow::Error;
+
+    fn try_from(value: DirEntry) -> Result<Self, Self::Error> {
+        let file_type = value.file_type()?;
+
+        let path = value.path();
+        let item = if file_type.is_dir() {
+            Entry {
+                path,
+                kind: EntryKind::Directory,
+            }
+        } else {
+            let extension = path.extension().map(|x| x.to_string_lossy().into_owned());
+
+            Entry {
+                path,
+                kind: EntryKind::File { extension },
+            }
+        };
+
+        Ok(item)
+    }
+}
+
+impl From<&Entry> for ListItem<'_> {
+    fn from(value: &Entry) -> Self {
+        let name = value
+            .path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+
+        if value.kind == EntryKind::Directory {
+            let style = Style::new().bold();
+            ListItem::new(format!("{name}/")).style(style)
+        } else {
+            let style = Style::new().light_cyan();
+            ListItem::new(name).style(style)
+        }
     }
 }
 
@@ -170,15 +215,17 @@ impl App {
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new().borders(Borders::ALL).border_set(border::THICK);
 
+        // TODO: The items need to be ordered by type (file or directory) and then alphabetically.
+
         // Iterate through all elements in the `items` and stylize them.
         let items: Vec<ListItem> = self
             .entry_list
             .items
             .iter()
             .enumerate()
-            .map(|(_, todo_item)| {
+            .map(|(_, entry)| {
                 // let color = alternate_colors(i);
-                ListItem::from(todo_item)
+                ListItem::from(entry)
             })
             .collect();
 
@@ -227,10 +274,30 @@ impl Widget for &mut App {
 mod tests {
     use super::*;
 
+    fn create_test_app() -> App {
+        App {
+            should_exit: false,
+            current_working_directory: PathBuf::from("/home/user"),
+            entry_list: EntryList {
+                items: vec![
+                    Entry {
+                        path: PathBuf::from("/home/user/.gitignore"),
+                        kind: EntryKind::File { extension: None },
+                    },
+                    Entry {
+                        path: PathBuf::from("/home/user/.git/"),
+                        kind: EntryKind::Directory,
+                    },
+                ],
+                state: ListState::default(),
+            },
+        }
+    }
+
     #[test]
     fn render() {
-        let mut app = App::default();
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 10));
+        let mut app = create_test_app();
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 7));
 
         app.render(buffer.area, &mut buffer);
 
@@ -240,11 +307,8 @@ mod tests {
             "                                    Tiny FE                                    ",
             sub_header_text.as_ref(),
             "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
-            "┃>Rewrite everything with Rust!                                               ┃",
-            "┃ Rewrite all of your tui apps with Ratatui                                   ┃",
-            "┃ Pet your cat                                                                ┃",
-            "┃ Walk with your dog                                                          ┃",
-            "┃ Pay the bills                                                               ┃",
+            "┃>.gitignore                                                                  ┃",
+            "┃ .git/                                                                       ┃",
             "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
             "            Use ↓↑ to move, g/G to go top/bottom, ENTER to select.             ",
         ]);
@@ -252,27 +316,36 @@ mod tests {
         // Apply BOLD to the entire first line
         expected.set_style(Rect::new(0, 0, 79, 1), Style::new().bold());
 
-        // Clear BOLD at the beginning of the second line and make it green
+        // Apply Green foreground color to the second line
         expected.set_style(Rect::new(0, 1, 79, 1), Style::new().fg(Color::Green));
 
-        // Remove green from the next line
-        expected.set_style(Rect::new(0, 3, 79, 1), Style::new());
+        // Ensure no styles are applied to the third line
+        expected.set_style(Rect::new(0, 2, 79, 1), Style::new());
 
-        // Apply DarkGray background to line 2 (index 2)
-        expected.set_style(Rect::new(1, 3, 77, 1), Style::new().bg(Color::DarkGray));
+        // Apply DarkGray background and LightCyan foreground to the highlighted line
+        expected.set_style(
+            Rect::new(1, 3, 77, 1),
+            Style::new().bg(Color::DarkGray).fg(Color::LightCyan),
+        );
 
-        // Clear background color at the end of the highlighted line
+        // Clear styles at the end of the highlighted line
         expected.set_style(Rect::new(78, 3, 1, 1), Style::new());
 
-        // Reset style at the beginning of the third line
+        // Reset styles at the beginning of line 4
         expected.set_style(Rect::new(0, 4, 79, 1), Style::new());
+
+        // Apply BOLD to text at line 4, starting at x=1
+        expected.set_style(Rect::new(1, 4, 77, 1), Style::new().bold());
+
+        // Clear BOLD at the end of line 4
+        expected.set_style(Rect::new(78, 4, 1, 1), Style::new());
 
         assert_eq!(buffer, expected);
     }
 
     #[test]
     fn first_item_is_preselected_after_render() {
-        let mut app = App::default();
+        let mut app = create_test_app();
         let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 10));
 
         assert_eq!(app.entry_list.state.selected(), None);
@@ -284,10 +357,10 @@ mod tests {
 
     #[test]
     fn handle_key_event() {
-        let mut app = App::default();
+        let mut app = create_test_app();
 
-        // Make sure we have 6 items
-        assert_eq!(app.entry_list.len(), 6);
+        // Make sure we have 2 items
+        assert_eq!(app.entry_list.len(), 2);
 
         app.handle_key_event(KeyCode::Char('q').into());
         assert!(app.should_exit);
