@@ -1,7 +1,7 @@
 use std::{
     env,
     fs::{DirEntry, ReadDir},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use anyhow::Ok;
@@ -9,32 +9,29 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{prelude::*, widgets::*, DefaultTerminal};
 use symbols::border;
 
+/// Enum representing whether the system is currently showing a directory listing or paths from the
+/// database.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListMode {
+    /// The system is currently showing a directory listing.
+    Directory { path: PathBuf },
+    // TODO: Implement this mode
+    /// The system is currently showing paths from the database.
+    #[allow(dead_code)]
+    Database,
+}
+
 /// The main application struct, will hold the state of the application.
 #[derive(Debug)]
 pub struct App {
     /// A boolean used to signal if the app should exit
     should_exit: bool,
 
-    /// Current working directory
-    current_working_directory: PathBuf,
+    /// The current mode of the list
+    list_mode: ListMode,
 
     /// A list representing the entries in the current working directory
     entry_list: EntryList,
-}
-
-impl App {
-    pub fn try_new() -> anyhow::Result<Self> {
-        let current_working_directory = env::current_dir()?;
-        let entries = std::fs::read_dir(&current_working_directory)?;
-
-        let entry_list = EntryList::try_from(entries)?;
-
-        Ok(Self {
-            should_exit: false,
-            current_working_directory,
-            entry_list,
-        })
-    }
 }
 
 #[derive(Debug, Default)]
@@ -73,6 +70,7 @@ impl TryFrom<ReadDir> for EntryList {
 struct Entry {
     path: PathBuf,
     kind: EntryKind,
+    name: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -86,12 +84,18 @@ impl TryFrom<DirEntry> for Entry {
 
     fn try_from(value: DirEntry) -> Result<Self, Self::Error> {
         let file_type = value.file_type()?;
-
         let path = value.path();
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+
         let item = if file_type.is_dir() {
             Entry {
                 path,
                 kind: EntryKind::Directory,
+                name,
             }
         } else {
             let extension = path.extension().map(|x| x.to_string_lossy().into_owned());
@@ -99,6 +103,7 @@ impl TryFrom<DirEntry> for Entry {
             Entry {
                 path,
                 kind: EntryKind::File { extension },
+                name,
             }
         };
 
@@ -108,24 +113,82 @@ impl TryFrom<DirEntry> for Entry {
 
 impl From<&Entry> for ListItem<'_> {
     fn from(value: &Entry) -> Self {
-        let name = value
-            .path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-
         if value.kind == EntryKind::Directory {
             let style = Style::new().bold();
-            ListItem::new(format!("{name}/")).style(style)
+            ListItem::new(format!("{name}/", name = value.name)).style(style)
         } else {
             let style = Style::new().light_cyan();
-            ListItem::new(name).style(style)
+            ListItem::new(value.name.clone()).style(style)
+        }
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            should_exit: false,
+            list_mode: ListMode::Directory {
+                path: PathBuf::default(),
+            },
+            entry_list: EntryList::default(),
         }
     }
 }
 
 impl App {
+    /// Tries to create a new instance of the application - this will read the current directory
+    /// and populate the entry list.
+    pub fn try_new() -> anyhow::Result<Self> {
+        let path = env::current_dir()?;
+        let mut app = App::default();
+
+        app.change_directory(path)?;
+
+        Ok(app)
+    }
+
+    /// Changes the current directory and sorts the entries in the new directory.
+    fn change_directory<T: AsRef<Path>>(&mut self, path: T) -> anyhow::Result<()> {
+        let entries = std::fs::read_dir(path.as_ref())?;
+        let mut entry_list = EntryList::try_from(entries)?;
+
+        entry_list.items.sort_by(|a, b| {
+            match (&a.kind, &b.kind) {
+                (EntryKind::Directory, EntryKind::Directory)
+                | (EntryKind::File { .. }, EntryKind::File { .. }) => a
+                    .name
+                    .to_lowercase()
+                    .partial_cmp(&b.name.to_lowercase())
+                    .unwrap(),
+                // Otherwise, put folders first
+                (EntryKind::Directory, EntryKind::File { .. }) => std::cmp::Ordering::Less,
+                (EntryKind::File { .. }, EntryKind::Directory) => std::cmp::Ordering::Greater,
+            }
+        });
+
+        // Add the parent directory after sorting so that it's always the first item
+        if let Some(parent) = path.as_ref().parent() {
+            entry_list.items.insert(
+                0,
+                Entry {
+                    path: parent.to_path_buf(),
+                    kind: EntryKind::Directory,
+                    name: "..".into(),
+                },
+            );
+        }
+
+        let list_mode = ListMode::Directory {
+            path: path.as_ref().to_path_buf(),
+        };
+
+        self.should_exit = false;
+        self.list_mode = list_mode;
+        self.entry_list = entry_list;
+
+        Ok(())
+    }
+
     /// Runs the application's main loop until the user quits.
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         while !self.should_exit {
@@ -146,7 +209,7 @@ impl App {
             // It's important to check that the event is a key press event as crossterm also emits
             // key release and repeat events on Windows
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
+                self.handle_key_event(key_event)?
             }
             // Ignore the rest
             _ => {}
@@ -155,9 +218,9 @@ impl App {
         Ok(())
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent) {
+    fn handle_key_event(&mut self, key: KeyEvent) -> anyhow::Result<()> {
         if key.kind != KeyEventKind::Press {
-            return;
+            return Ok(());
         }
 
         match key.code {
@@ -181,12 +244,35 @@ impl App {
                 self.entry_list.state.select_last();
             }
 
-            KeyCode::Enter => {
+            KeyCode::Char('l') | KeyCode::Right => {
+                // TODO: Introduce tabs and switch the different list modes
                 todo!()
+            }
+
+            KeyCode::Char('h') | KeyCode::Left => {
+                // TODO: Introduce tabs and switch the different list modes
+                todo!()
+            }
+
+            KeyCode::Enter => {
+                let entry_index = self.entry_list.state.selected().unwrap_or_default();
+                let selected_entry = &self.entry_list.items[entry_index];
+                // TODO: Remove the unwrap and turn the handle_key_event into a Result
+                // TODO: See if we can remove the clone here
+                self.change_directory(selected_entry.path.clone())?;
             }
 
             // Ignore the rest
             _ => {}
+        }
+
+        Ok(())
+    }
+
+    pub fn get_sub_header_title(&self) -> String {
+        match &self.list_mode {
+            ListMode::Directory { path } => path.to_string_lossy().into_owned(),
+            ListMode::Database => "Most accessed paths".into(),
         }
     }
 
@@ -198,7 +284,7 @@ impl App {
     }
 
     fn render_sub_header(&mut self, area: Rect, buf: &mut Buffer) {
-        let title = self.current_working_directory.to_string_lossy();
+        let title = self.get_sub_header_title();
 
         Paragraph::new(title)
             .green()
@@ -214,8 +300,6 @@ impl App {
 
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new().borders(Borders::ALL).border_set(border::THICK);
-
-        // TODO: The items need to be ordered by type (file or directory) and then alphabetically.
 
         // Iterate through all elements in the `items` and stylize them.
         let items: Vec<ListItem> = self.entry_list.items.iter().map(ListItem::from).collect();
@@ -268,16 +352,20 @@ mod tests {
     fn create_test_app() -> App {
         App {
             should_exit: false,
-            current_working_directory: PathBuf::from("/home/user"),
+            list_mode: ListMode::Directory {
+                path: PathBuf::from("/home/user"),
+            },
             entry_list: EntryList {
                 items: vec![
                     Entry {
-                        path: PathBuf::from("/home/user/.gitignore"),
-                        kind: EntryKind::File { extension: None },
-                    },
-                    Entry {
                         path: PathBuf::from("/home/user/.git/"),
                         kind: EntryKind::Directory,
+                        name: ".git".into(),
+                    },
+                    Entry {
+                        path: PathBuf::from("/home/user/.gitignore"),
+                        kind: EntryKind::File { extension: None },
+                        name: ".gitignore".into(),
                     },
                 ],
                 state: ListState::default(),
@@ -292,14 +380,14 @@ mod tests {
 
         app.render(buffer.area, &mut buffer);
 
-        let sub_header_text = app.current_working_directory.to_string_lossy();
+        let sub_header_text = app.get_sub_header_title();
 
         let mut expected = Buffer::with_lines(vec![
             "                                    Tiny FE                                    ",
             sub_header_text.as_ref(),
             "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
-            "┃>.gitignore                                                                  ┃",
-            "┃ .git/                                                                       ┃",
+            "┃>.git/                                                                       ┃",
+            "┃ .gitignore                                                                  ┃",
             "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
             "            Use ↓↑ to move, g/G to go top/bottom, ENTER to select.             ",
         ]);
@@ -307,30 +395,26 @@ mod tests {
         // Apply BOLD to the entire first line
         expected.set_style(Rect::new(0, 0, 79, 1), Style::new().bold());
 
-        // Apply Green foreground color to the second line
+        // Apply Green foreground color to the second line (sub-header)
         expected.set_style(Rect::new(0, 1, 79, 1), Style::new().fg(Color::Green));
 
-        // Ensure no styles are applied to the third line
+        // Ensure no styles are applied to the third line (border)
         expected.set_style(Rect::new(0, 2, 79, 1), Style::new());
 
-        // Apply DarkGray background and LightCyan foreground to the highlighted line
+        // Apply DarkGray background and BOLD modifier to the highlighted item (line 3)
         expected.set_style(
             Rect::new(1, 3, 77, 1),
-            Style::new().bg(Color::DarkGray).fg(Color::LightCyan),
+            Style::new().bg(Color::DarkGray).bold(),
         );
 
         // Clear styles at the end of the highlighted line
         expected.set_style(Rect::new(78, 3, 1, 1), Style::new());
 
-        // Reset styles at the beginning of line 4
-        expected.set_style(Rect::new(0, 4, 79, 1), Style::new());
+        // Apply LightCyan foreground color to the next item (line 4)
+        expected.set_style(Rect::new(1, 4, 77, 1), Style::new().fg(Color::LightCyan));
 
-        // Apply BOLD to text at line 4, starting at x=1
-        expected.set_style(Rect::new(1, 4, 77, 1), Style::new().bold());
-
-        // Clear BOLD at the end of line 4
+        // Clear styles at the end of line 4
         expected.set_style(Rect::new(78, 4, 1, 1), Style::new());
-
         assert_eq!(buffer, expected);
     }
 
@@ -353,37 +437,37 @@ mod tests {
         // Make sure we have 2 items
         assert_eq!(app.entry_list.len(), 2);
 
-        app.handle_key_event(KeyCode::Char('q').into());
+        let _ = app.handle_key_event(KeyCode::Char('q').into());
         assert!(app.should_exit);
 
-        app.handle_key_event(KeyCode::Esc.into());
+        let _ = app.handle_key_event(KeyCode::Esc.into());
         assert!(app.should_exit);
 
-        app.handle_key_event(KeyCode::Char('j').into());
+        let _ = app.handle_key_event(KeyCode::Char('j').into());
         assert_eq!(app.entry_list.state.selected(), Some(0));
 
-        app.handle_key_event(KeyCode::Down.into());
+        let _ = app.handle_key_event(KeyCode::Down.into());
         assert_eq!(app.entry_list.state.selected(), Some(1));
 
         // press down so that we can go back up more than once
-        app.handle_key_event(KeyCode::Down.into());
+        let _ = app.handle_key_event(KeyCode::Down.into());
 
-        app.handle_key_event(KeyCode::Char('k').into());
+        let _ = app.handle_key_event(KeyCode::Char('k').into());
         assert_eq!(app.entry_list.state.selected(), Some(1));
 
-        app.handle_key_event(KeyCode::Up.into());
+        let _ = app.handle_key_event(KeyCode::Up.into());
         assert_eq!(app.entry_list.state.selected(), Some(0));
 
-        app.handle_key_event(KeyCode::Char('G').into());
+        let _ = app.handle_key_event(KeyCode::Char('G').into());
         assert_eq!(app.entry_list.state.selected(), Some(usize::MAX));
 
-        app.handle_key_event(KeyCode::Char('g').into());
+        let _ = app.handle_key_event(KeyCode::Char('g').into());
         assert_eq!(app.entry_list.state.selected(), Some(0));
 
-        app.handle_key_event(KeyCode::End.into());
+        let _ = app.handle_key_event(KeyCode::End.into());
         assert_eq!(app.entry_list.state.selected(), Some(usize::MAX));
 
-        app.handle_key_event(KeyCode::Home.into());
+        let _ = app.handle_key_event(KeyCode::Home.into());
         assert_eq!(app.entry_list.state.selected(), Some(0));
     }
 }
