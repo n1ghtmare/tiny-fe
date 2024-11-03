@@ -1,0 +1,29 @@
+---
+source: src/app.rs
+expression: terminal.backend()
+snapshot_kind: text
+---
+"                                     Tiny FE                                    "
+"/home/user                                                                      "
+"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
+"┃>.git/                                                                        ┃"
+"┃ .gitignore                                                                   ┃"
+"┃                                                                              ┃"
+"┃                   ┌ Help ────────────────────────────────┐                   ┃"
+"┃                   │Key Bindings:                         │                   ┃"
+"┃                   │                                      │                   ┃"
+"┃                   │> j/k or ↓/↑ - Move down/up           │                   ┃"
+"┃                   │> g/G or Home/End - Go to top/bottom  │                   ┃"
+"┃                   │> d/r - Switch category (d)irectory or│                   ┃"
+"┃                   │(f)recent                             │                   ┃"
+"┃                   │> Enter - Select item                 │                   ┃"
+"┃                   │> ? - Toggle help                     │                   ┃"
+"┃                   │> q or Esc - Quit                     │                   ┃"
+"┃                   │                                      │                   ┃"
+"┃                   └──────────────────────────────────────┘                   ┃"
+"┃                                                                              ┃"
+"┃                                                                              ┃"
+"┃                                                                              ┃"
+"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
+" (d)irectory │ (f)recent                                                        "
+"                                Press ? for help                                "

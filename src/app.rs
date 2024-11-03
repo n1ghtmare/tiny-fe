@@ -222,14 +222,10 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         frame.render_widget(&mut *self, frame.area());
-
-        if self.show_help {
-            self.render_help_popup(frame);
-        }
     }
 
-    fn render_help_popup(&self, frame: &mut Frame) {
-        let size = frame.area();
+    fn render_help_popup(&self, buf: &mut Buffer) {
+        let size = buf.area();
 
         // Define the popup area (e.g., centered and smaller than full screen)
         let popup_area = Rect {
@@ -273,14 +269,13 @@ impl App {
                 Span::raw(" - Quit"),
             ]),
         ]))
+        .reset()
         .block(block)
         .wrap(Wrap { trim: true })
         .alignment(Alignment::Left);
 
-        // Render the help popup
-        // Clear the area first
-        frame.render_widget(Clear, popup_area);
-        frame.render_widget(help_paragraph, popup_area);
+        // Render the help popup in the buffer
+        help_paragraph.render(popup_area, buf);
     }
 
     /// Updates the application's state based on the user input.
@@ -454,6 +449,10 @@ impl Widget for &mut App {
         self.render_selected_tab_title(selected_tab_title_area, buf);
         self.render_tabs(tabs_area, buf);
         self.render_list(list_area, buf);
+
+        if self.show_help {
+            self.render_help_popup(buf);
+        }
     }
 }
 
@@ -492,6 +491,20 @@ mod tests {
     fn renders_correctly() {
         let mut app = create_test_app();
         let mut terminal = Terminal::new(TestBackend::new(80, 9)).unwrap();
+
+        terminal
+            .draw(|frame| frame.render_widget(&mut app, frame.area()))
+            .unwrap();
+
+        assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
+    fn renders_correctly_with_help_popup() {
+        let mut app = create_test_app();
+        app.show_help = true;
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
         terminal
             .draw(|frame| frame.render_widget(&mut app, frame.area()))
