@@ -121,10 +121,10 @@ impl TryFrom<DirEntry> for Entry {
 impl From<&Entry> for ListItem<'_> {
     fn from(value: &Entry) -> Self {
         if value.kind == EntryKind::Directory {
-            let style = Style::new().bold();
+            let style = Style::new().bold().fg(Color::White);
             ListItem::new(format!("{name}/", name = value.name)).style(style)
         } else {
-            let style = Style::new().light_cyan();
+            let style = Style::new().dark_gray();
             ListItem::new(value.name.clone()).style(style)
         }
     }
@@ -191,6 +191,23 @@ impl App {
         self.current_directory = path.as_ref().to_path_buf();
 
         Ok(())
+    }
+
+    fn change_list_mode(&mut self, mode: ListMode) -> anyhow::Result<()> {
+        if self.list_mode == mode {
+            return Ok(());
+        }
+
+        self.list_mode = mode;
+
+        match self.list_mode {
+            ListMode::Directory => self.change_directory(self.current_directory.clone()),
+            ListMode::Frecent => {
+                // TODO: Fetch the most frecent paths from the database
+                self.entry_list = EntryList::default();
+                Ok(())
+            }
+        }
     }
 
     /// Runs the application's main loop until the user quits.
@@ -317,31 +334,26 @@ impl App {
 
             KeyCode::Char('f') | KeyCode::Right => {
                 self.show_help = false;
-                if self.list_mode == ListMode::Frecent {
-                    // We're already in the frecent listing mode
-                    return Ok(());
-                }
-
-                self.list_mode = ListMode::Frecent;
-                // TODO: Implement this mode
+                self.change_list_mode(ListMode::Frecent)?;
             }
 
             KeyCode::Char('d') | KeyCode::Left => {
                 self.show_help = false;
-                if self.list_mode == ListMode::Directory {
-                    // We're already in the directory listing mode
-                    return Ok(());
-                }
-
-                self.change_directory(self.current_directory.clone())?;
+                self.change_list_mode(ListMode::Directory)?;
             }
 
             KeyCode::Enter => {
                 self.show_help = false;
                 let entry_index = self.entry_list.state.selected().unwrap_or_default();
                 let selected_entry = &self.entry_list.items[entry_index];
-                // TODO: See if we can remove the clone here
-                self.change_directory(selected_entry.path.clone())?;
+
+                if selected_entry.kind == EntryKind::Directory {
+                    // TODO: See if we can remove the clone here
+                    self.change_directory(selected_entry.path.clone())?;
+                } else {
+                    // The user has selected a file, exit
+                    self.should_exit = true;
+                }
             }
 
             // Ignore the rest
@@ -393,7 +405,10 @@ impl App {
     }
 
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
-        let block = Block::new().borders(Borders::ALL).border_set(border::THICK);
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_set(border::THICK)
+            .border_style(Style::new().fg(Color::DarkGray));
 
         // Iterate through all elements in the `items` and stylize them.
         let items: Vec<ListItem> = self.entry_list.items.iter().map(ListItem::from).collect();
@@ -401,7 +416,7 @@ impl App {
         // Create a List from all list items and highlight the currently selected one
         let list = List::new(items)
             .block(block)
-            .highlight_style(Style::new().bg(Color::DarkGray))
+            .highlight_style(Style::new().bg(Color::Gray).fg(Color::Black))
             .highlight_symbol(">")
             .highlight_spacing(HighlightSpacing::Always);
 
@@ -446,6 +461,9 @@ impl Widget for &mut App {
 mod tests {
     use super::*;
 
+    use insta::assert_snapshot;
+    use ratatui::{backend::TestBackend, Terminal};
+
     fn create_test_app() -> App {
         App {
             should_exit: false,
@@ -471,64 +489,15 @@ mod tests {
     }
 
     #[test]
-    fn render() {
+    fn renders_correctly() {
         let mut app = create_test_app();
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 8));
+        let mut terminal = Terminal::new(TestBackend::new(80, 9)).unwrap();
 
-        app.render(buffer.area, &mut buffer);
+        terminal
+            .draw(|frame| frame.render_widget(&mut app, frame.area()))
+            .unwrap();
 
-        let sub_header_text = app.get_sub_header_title();
-
-        let mut expected = Buffer::with_lines(vec![
-            "                                    Tiny FE                                    ",
-            sub_header_text.as_ref(),
-            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
-            "┃>.git/                                                                       ┃",
-            "┃ .gitignore                                                                  ┃",
-            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
-            " (d)irectory │ (f)recent                                                       ",
-            "                               Press ? for help                                ",
-        ]);
-
-        // Apply BOLD to the entire first line
-        expected.set_style(
-            Rect::new(0, 0, 79, 1),
-            Style::default().add_modifier(Modifier::BOLD),
-        );
-
-        // Apply Green foreground color to the second line (sub-header)
-        expected.set_style(Rect::new(0, 1, 79, 1), Style::default().fg(Color::Green));
-
-        // Ensure no styles are applied to the third line (border)
-        expected.set_style(Rect::new(0, 2, 79, 1), Style::default());
-
-        // Apply DarkGray background and BOLD modifier to the highlighted item (line 3)
-        expected.set_style(
-            Rect::new(1, 3, 77, 1),
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
-
-        // Clear styles at the end of the highlighted line
-        expected.set_style(Rect::new(78, 3, 1, 1), Style::default());
-
-        // Apply LightCyan foreground color to the next item (line 4)
-        expected.set_style(
-            Rect::new(1, 4, 77, 1),
-            Style::default().fg(Color::LightCyan),
-        );
-
-        // Clear styles at the end of line 4
-        expected.set_style(Rect::new(78, 4, 1, 1), Style::default());
-
-        // Apply Green foreground color to "(d)irectory" on line 6
-        expected.set_style(Rect::new(1, 6, 11, 1), Style::default().fg(Color::Green));
-
-        // Ensure the rest of line 6 has default styling
-        expected.set_style(Rect::new(12, 6, 67, 1), Style::default());
-
-        assert_eq!(buffer, expected);
+        assert_snapshot!(terminal.backend());
     }
 
     #[test]
@@ -582,5 +551,17 @@ mod tests {
 
         let _ = app.handle_key_event(KeyCode::Home.into());
         assert_eq!(app.entry_list.state.selected(), Some(0));
+
+        let _ = app.handle_key_event(KeyCode::Char('d').into());
+        assert_eq!(app.list_mode, ListMode::Directory);
+
+        let _ = app.handle_key_event(KeyCode::Char('f').into());
+        assert_eq!(app.list_mode, ListMode::Frecent);
+
+        let _ = app.handle_key_event(KeyCode::Char('d').into());
+        assert_eq!(app.list_mode, ListMode::Directory);
+
+        let _ = app.handle_key_event(KeyCode::Char('?').into());
+        assert!(app.show_help);
     }
 }

@@ -11,4 +11,5 @@ crossterm = "0.28.1"
 ratatui = "0.28.1"
 
 [dev-dependencies]
+insta = "1.41.1"
 tempfile = "3.13.0"
