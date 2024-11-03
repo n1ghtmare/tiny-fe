@@ -18,7 +18,7 @@ pub enum ListMode {
     // TODO: Implement this mode
     /// The system is currently showing paths from the database.
     #[allow(dead_code)]
-    Database,
+    Frecent,
 }
 
 /// The main application struct, will hold the state of the application.
@@ -148,7 +148,7 @@ impl App {
     }
 
     /// Changes the current directory and sorts the entries in the new directory.
-    fn change_directory<T: AsRef<Path>>(&mut self, path: T) -> anyhow::Result<()> {
+    pub fn change_directory<T: AsRef<Path>>(&mut self, path: T) -> anyhow::Result<()> {
         let entries = std::fs::read_dir(path.as_ref())?;
         let mut entry_list = EntryList::try_from(entries)?;
 
@@ -272,7 +272,7 @@ impl App {
     pub fn get_sub_header_title(&self) -> String {
         match &self.list_mode {
             ListMode::Directory { path } => path.to_string_lossy().into_owned(),
-            ListMode::Database => "Most accessed paths".into(),
+            ListMode::Frecent => "Most accessed paths".into(),
         }
     }
 

@@ -9,3 +9,6 @@ edition = "2021"
 anyhow = "1.0.89"
 crossterm = "0.28.1"
 ratatui = "0.28.1"
+
+[dev-dependencies]
+tempfile = "3.13.0"
