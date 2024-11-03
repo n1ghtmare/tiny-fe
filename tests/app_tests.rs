@@ -3,7 +3,7 @@ use std::fs::{create_dir, File};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     widgets::Widget,
 };
 use tempfile::tempdir;
@@ -29,7 +29,7 @@ fn change_directory_lists_correct_directory_entires() {
     let mut app = App::default();
     app.change_directory(temp_path).unwrap();
 
-    let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 9));
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 10));
 
     app.render(buffer.area, &mut buffer);
 
@@ -44,44 +44,65 @@ fn change_directory_lists_correct_directory_entires() {
         "┃ file_1.txt                                                                  ┃",
         "┃ file_2.txt                                                                  ┃",
         "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
-        "            Use ↓↑ to move, g/G to go top/bottom, ENTER to select.             ",
+        " (d)irectory │ (f)recent                                                       ",
+        "                               Press ? for help                                ",
     ]);
 
     // Apply BOLD to the entire first line (header)
-    expected.set_style(Rect::new(0, 0, 79, 1), Style::new().bold());
+    expected.set_style(
+        Rect::new(0, 0, 79, 1),
+        Style::default().add_modifier(Modifier::BOLD),
+    );
 
     // Apply Green foreground color to the second line (sub-header)
-    expected.set_style(Rect::new(0, 1, 79, 1), Style::new().fg(Color::Green));
+    expected.set_style(Rect::new(0, 1, 79, 1), Style::default().fg(Color::Green));
 
     // Ensure no styles are applied to the third line (border)
-    expected.set_style(Rect::new(0, 2, 79, 1), Style::new());
+    expected.set_style(Rect::new(0, 2, 79, 1), Style::default());
 
     // Apply DarkGray background and BOLD modifier to the highlighted item (line 3)
     expected.set_style(
         Rect::new(1, 3, 77, 1),
-        Style::new().bg(Color::DarkGray).bold(),
+        Style::default()
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
     );
 
     // Clear styles at the end of the highlighted line
-    expected.set_style(Rect::new(78, 3, 1, 1), Style::new());
+    expected.set_style(Rect::new(78, 3, 1, 1), Style::default());
 
     // Apply BOLD to the directory entry (line 4)
-    expected.set_style(Rect::new(1, 4, 77, 1), Style::new().bold());
+    expected.set_style(
+        Rect::new(1, 4, 77, 1),
+        Style::default().add_modifier(Modifier::BOLD),
+    );
 
     // Clear styles at the end of line 4
-    expected.set_style(Rect::new(78, 4, 1, 1), Style::new());
+    expected.set_style(Rect::new(78, 4, 1, 1), Style::default());
 
     // Apply LightCyan foreground color to the first file entry (line 5)
-    expected.set_style(Rect::new(1, 5, 77, 1), Style::new().fg(Color::LightCyan));
+    expected.set_style(
+        Rect::new(1, 5, 77, 1),
+        Style::default().fg(Color::LightCyan),
+    );
 
     // Clear styles at the end of line 5
-    expected.set_style(Rect::new(78, 5, 1, 1), Style::new());
+    expected.set_style(Rect::new(78, 5, 1, 1), Style::default());
 
     // Apply LightCyan foreground color to the second file entry (line 6)
-    expected.set_style(Rect::new(1, 6, 77, 1), Style::new().fg(Color::LightCyan));
+    expected.set_style(
+        Rect::new(1, 6, 77, 1),
+        Style::default().fg(Color::LightCyan),
+    );
 
     // Clear styles at the end of line 6
-    expected.set_style(Rect::new(78, 6, 1, 1), Style::new());
+    expected.set_style(Rect::new(78, 6, 1, 1), Style::default());
+
+    // Apply Green foreground color to "(d)irectory" on line 8
+    expected.set_style(Rect::new(1, 8, 11, 1), Style::default().fg(Color::Green));
+
+    // Ensure the rest of line 8 has default styling
+    expected.set_style(Rect::new(12, 8, 67, 1), Style::default());
 
     assert_eq!(buffer, expected);
 }

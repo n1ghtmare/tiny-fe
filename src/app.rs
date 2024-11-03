@@ -14,9 +14,10 @@ use symbols::border;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ListMode {
     /// The system is currently showing a directory listing.
-    Directory { path: PathBuf },
+    Directory,
     // TODO: Implement this mode
-    /// The system is currently showing paths from the database.
+    /// The system is currently showing paths from the database that have been accessed frequently
+    /// and recently.
     #[allow(dead_code)]
     Frecent,
 }
@@ -32,6 +33,12 @@ pub struct App {
 
     /// A list representing the entries in the current working directory
     entry_list: EntryList,
+
+    /// The current directory that the user is in
+    current_directory: PathBuf,
+
+    /// A boolean used to signal if the help popup should be shown
+    show_help: bool,
 }
 
 #[derive(Debug, Default)]
@@ -127,10 +134,10 @@ impl Default for App {
     fn default() -> Self {
         Self {
             should_exit: false,
-            list_mode: ListMode::Directory {
-                path: PathBuf::default(),
-            },
+            list_mode: ListMode::Directory,
             entry_list: EntryList::default(),
+            current_directory: PathBuf::new(),
+            show_help: false,
         }
     }
 }
@@ -178,13 +185,10 @@ impl App {
             );
         }
 
-        let list_mode = ListMode::Directory {
-            path: path.as_ref().to_path_buf(),
-        };
-
         self.should_exit = false;
-        self.list_mode = list_mode;
+        self.list_mode = ListMode::Directory;
         self.entry_list = entry_list;
+        self.current_directory = path.as_ref().to_path_buf();
 
         Ok(())
     }
@@ -200,7 +204,66 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        frame.render_widget(self, frame.area());
+        frame.render_widget(&mut *self, frame.area());
+
+        if self.show_help {
+            self.render_help_popup(frame);
+        }
+    }
+
+    fn render_help_popup(&self, frame: &mut Frame) {
+        let size = frame.area();
+
+        // Define the popup area (e.g., centered and smaller than full screen)
+        let popup_area = Rect {
+            x: size.width / 4,
+            y: size.height / 4,
+            width: size.width / 2,
+            height: size.height / 2,
+        };
+
+        let block = Block::default()
+            .title(" Help ")
+            .title_style(Style::default().bold().fg(Color::Red))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Plain);
+
+        let help_paragraph = Paragraph::new(Text::from(vec![
+            Line::from("Key Bindings:"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("> j/k or ↓/↑", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Move down/up"),
+            ]),
+            Line::from(vec![
+                Span::styled("> g/G or Home/End", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Go to top/bottom"),
+            ]),
+            Line::from(vec![
+                Span::styled("> d/r", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Switch category (d)irectory or (f)recent"),
+            ]),
+            Line::from(vec![
+                Span::styled("> Enter", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Select item"),
+            ]),
+            Line::from(vec![
+                Span::styled("> ?", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Toggle help"),
+            ]),
+            Line::from(vec![
+                Span::styled("> q or Esc", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Quit"),
+            ]),
+        ]))
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .alignment(Alignment::Left);
+
+        // Render the help popup
+        // Clear the area first
+        frame.render_widget(Clear, popup_area);
+        frame.render_widget(help_paragraph, popup_area);
     }
 
     /// Updates the application's state based on the user input.
@@ -224,40 +287,59 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Char('?') => {
+                self.show_help = !self.show_help;
+            }
+
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.should_exit = true;
             }
 
             KeyCode::Char('j') | KeyCode::Down => {
+                self.show_help = false;
                 self.entry_list.state.select_next();
             }
 
             KeyCode::Char('k') | KeyCode::Up => {
+                self.show_help = false;
                 self.entry_list.state.select_previous();
             }
 
             KeyCode::Char('g') | KeyCode::Home => {
+                self.show_help = false;
                 self.entry_list.state.select_first();
             }
 
             KeyCode::Char('G') | KeyCode::End => {
+                self.show_help = false;
                 self.entry_list.state.select_last();
             }
 
-            KeyCode::Char('l') | KeyCode::Right => {
-                // TODO: Introduce tabs and switch the different list modes
-                todo!()
+            KeyCode::Char('f') | KeyCode::Right => {
+                self.show_help = false;
+                if self.list_mode == ListMode::Frecent {
+                    // We're already in the frecent listing mode
+                    return Ok(());
+                }
+
+                self.list_mode = ListMode::Frecent;
+                // TODO: Implement this mode
             }
 
-            KeyCode::Char('h') | KeyCode::Left => {
-                // TODO: Introduce tabs and switch the different list modes
-                todo!()
+            KeyCode::Char('d') | KeyCode::Left => {
+                self.show_help = false;
+                if self.list_mode == ListMode::Directory {
+                    // We're already in the directory listing mode
+                    return Ok(());
+                }
+
+                self.change_directory(self.current_directory.clone())?;
             }
 
             KeyCode::Enter => {
+                self.show_help = false;
                 let entry_index = self.entry_list.state.selected().unwrap_or_default();
                 let selected_entry = &self.entry_list.items[entry_index];
-                // TODO: Remove the unwrap and turn the handle_key_event into a Result
                 // TODO: See if we can remove the clone here
                 self.change_directory(selected_entry.path.clone())?;
             }
@@ -271,7 +353,7 @@ impl App {
 
     pub fn get_sub_header_title(&self) -> String {
         match &self.list_mode {
-            ListMode::Directory { path } => path.to_string_lossy().into_owned(),
+            ListMode::Directory => self.current_directory.to_string_lossy().into_owned(),
             ListMode::Frecent => "Most accessed paths".into(),
         }
     }
@@ -283,7 +365,7 @@ impl App {
             .render(area, buf);
     }
 
-    fn render_sub_header(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render_selected_tab_title(&mut self, area: Rect, buf: &mut Buffer) {
         let title = self.get_sub_header_title();
 
         Paragraph::new(title)
@@ -292,8 +374,20 @@ impl App {
             .render(area, buf);
     }
 
+    fn render_tabs(&mut self, area: Rect, buf: &mut Buffer) {
+        let select_index = match self.list_mode {
+            ListMode::Directory => 0,
+            ListMode::Frecent => 1,
+        };
+
+        Tabs::new(["(d)irectory", "(f)recent"])
+            .highlight_style(Style::new().fg(Color::Green))
+            .select(select_index)
+            .render(area, buf);
+    }
+
     fn render_footer(area: Rect, buf: &mut Buffer) {
-        Paragraph::new("Use ↓↑ to move, g/G to go top/bottom, ENTER to select.")
+        Paragraph::new("Press ? for help")
             .centered()
             .render(area, buf);
     }
@@ -327,20 +421,23 @@ impl Widget for &mut App {
     where
         Self: Sized,
     {
-        let [header_area, sub_header_area, main_area, footer_area] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Fill(1),
-            Constraint::Length(1),
-        ])
-        .areas(area);
+        let [header_area, selected_tab_title_area, main_area, tabs_area, footer_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Fill(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .areas(area);
 
         let [list_area] = Layout::vertical([Constraint::Fill(1)]).areas(main_area);
 
         App::render_header(header_area, buf);
         App::render_footer(footer_area, buf);
 
-        self.render_sub_header(sub_header_area, buf);
+        self.render_selected_tab_title(selected_tab_title_area, buf);
+        self.render_tabs(tabs_area, buf);
         self.render_list(list_area, buf);
     }
 }
@@ -352,9 +449,8 @@ mod tests {
     fn create_test_app() -> App {
         App {
             should_exit: false,
-            list_mode: ListMode::Directory {
-                path: PathBuf::from("/home/user"),
-            },
+            current_directory: PathBuf::from("/home/user"),
+            list_mode: ListMode::Directory,
             entry_list: EntryList {
                 items: vec![
                     Entry {
@@ -370,13 +466,14 @@ mod tests {
                 ],
                 state: ListState::default(),
             },
+            show_help: false,
         }
     }
 
     #[test]
     fn render() {
         let mut app = create_test_app();
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 7));
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 8));
 
         app.render(buffer.area, &mut buffer);
 
@@ -389,32 +486,48 @@ mod tests {
             "┃>.git/                                                                       ┃",
             "┃ .gitignore                                                                  ┃",
             "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
-            "            Use ↓↑ to move, g/G to go top/bottom, ENTER to select.             ",
+            " (d)irectory │ (f)recent                                                       ",
+            "                               Press ? for help                                ",
         ]);
 
         // Apply BOLD to the entire first line
-        expected.set_style(Rect::new(0, 0, 79, 1), Style::new().bold());
+        expected.set_style(
+            Rect::new(0, 0, 79, 1),
+            Style::default().add_modifier(Modifier::BOLD),
+        );
 
         // Apply Green foreground color to the second line (sub-header)
-        expected.set_style(Rect::new(0, 1, 79, 1), Style::new().fg(Color::Green));
+        expected.set_style(Rect::new(0, 1, 79, 1), Style::default().fg(Color::Green));
 
         // Ensure no styles are applied to the third line (border)
-        expected.set_style(Rect::new(0, 2, 79, 1), Style::new());
+        expected.set_style(Rect::new(0, 2, 79, 1), Style::default());
 
         // Apply DarkGray background and BOLD modifier to the highlighted item (line 3)
         expected.set_style(
             Rect::new(1, 3, 77, 1),
-            Style::new().bg(Color::DarkGray).bold(),
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
         );
 
         // Clear styles at the end of the highlighted line
-        expected.set_style(Rect::new(78, 3, 1, 1), Style::new());
+        expected.set_style(Rect::new(78, 3, 1, 1), Style::default());
 
         // Apply LightCyan foreground color to the next item (line 4)
-        expected.set_style(Rect::new(1, 4, 77, 1), Style::new().fg(Color::LightCyan));
+        expected.set_style(
+            Rect::new(1, 4, 77, 1),
+            Style::default().fg(Color::LightCyan),
+        );
 
         // Clear styles at the end of line 4
-        expected.set_style(Rect::new(78, 4, 1, 1), Style::new());
+        expected.set_style(Rect::new(78, 4, 1, 1), Style::default());
+
+        // Apply Green foreground color to "(d)irectory" on line 6
+        expected.set_style(Rect::new(1, 6, 11, 1), Style::default().fg(Color::Green));
+
+        // Ensure the rest of line 6 has default styling
+        expected.set_style(Rect::new(12, 6, 67, 1), Style::default());
+
         assert_eq!(buffer, expected);
     }
 
