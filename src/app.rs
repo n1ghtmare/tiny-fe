@@ -373,12 +373,13 @@ impl App {
     }
 
     fn render_selected_tab_title(&mut self, area: Rect, buf: &mut Buffer) {
-        let title = self.get_sub_header_title();
+        let line = Line::from(vec![
+            Span::styled("|>", Style::default().dark_gray()),
+            Span::raw(" "),
+            Span::styled(self.get_sub_header_title(), Style::default().green()),
+        ]);
 
-        Paragraph::new(title)
-            .green()
-            .left_aligned()
-            .render(area, buf);
+        Paragraph::new(Text::from(vec![line])).render(area, buf);
     }
 
     fn render_tabs(&mut self, area: Rect, buf: &mut Buffer) {

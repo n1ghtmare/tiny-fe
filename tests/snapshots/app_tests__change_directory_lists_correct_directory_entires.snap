@@ -4,7 +4,7 @@ expression: terminal.backend()
 snapshot_kind: text
 ---
 "                                     Tiny FE                                    "
-"/tmp/tiny_fe                                                                    "
+"|> /tmp/tiny_fe                                                                 "
 "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
 "┃>../                                                                          ┃"
 "┃ sub_dir/                                                                     ┃"
