@@ -515,6 +515,35 @@ mod tests {
     }
 
     #[test]
+    fn renders_correctly_with_help_popup_after_key_event() {
+        let mut app = create_test_app();
+        app.handle_key_event(KeyCode::Char('?').into()).unwrap();
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        terminal
+            .draw(|frame| frame.render_widget(&mut app, frame.area()))
+            .unwrap();
+
+        assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
+    fn renders_correctly_without_help_popup_after_key_event_toggle() {
+        let mut app = create_test_app();
+        app.show_help = true;
+        app.handle_key_event(KeyCode::Char('?').into()).unwrap();
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        terminal
+            .draw(|frame| frame.render_widget(&mut app, frame.area()))
+            .unwrap();
+
+        assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
     fn first_item_is_preselected_after_render() {
         let mut app = create_test_app();
         let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 10));
