@@ -1,6 +1,4 @@
-pub mod app;
-
-use app::App;
+use tiny_fe::app::App;
 
 fn main() -> anyhow::Result<()> {
     let mut terminal = ratatui::init();
