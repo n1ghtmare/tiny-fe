@@ -642,6 +642,40 @@ mod tests {
     }
 
     #[test]
+    fn renders_correctly_with_search_input_after_key_events() {
+        let mut app = create_test_app();
+        app.handle_key_event(KeyCode::Char('/').into()).unwrap();
+        app.handle_key_event(KeyCode::Char('t').into()).unwrap();
+        app.handle_key_event(KeyCode::Char('e').into()).unwrap();
+        app.handle_key_event(KeyCode::Char('s').into()).unwrap();
+        app.handle_key_event(KeyCode::Char('t').into()).unwrap();
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 9)).unwrap();
+
+        terminal
+            .draw(|frame| frame.render_widget(&mut app, frame.area()))
+            .unwrap();
+
+        assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
+    fn renders_correctly_with_search_input() {
+        let mut app = create_test_app();
+        app.input_mode = InputMode::Search;
+        app.search_input.value = "test".into();
+        app.search_input.index = 4;
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 9)).unwrap();
+
+        terminal
+            .draw(|frame| frame.render_widget(&mut app, frame.area()))
+            .unwrap();
+
+        assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
     fn first_item_is_preselected_after_render() {
         let mut app = create_test_app();
         let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 10));
@@ -704,5 +738,11 @@ mod tests {
 
         let _ = app.handle_key_event(KeyCode::Char('?').into());
         assert!(app.show_help);
+
+        let _ = app.handle_key_event(KeyCode::Char('/').into());
+        assert_eq!(app.input_mode, InputMode::Search);
+
+        let _ = app.handle_key_event(KeyCode::Esc.into());
+        assert_eq!(app.input_mode, InputMode::Normal);
     }
 }
