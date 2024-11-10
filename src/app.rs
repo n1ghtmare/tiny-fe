@@ -22,6 +22,12 @@ pub enum ListMode {
     Frecent,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum InputMode {
+    Normal,
+    Search,
+}
+
 /// The main application struct, will hold the state of the application.
 #[derive(Debug)]
 pub struct App {
@@ -39,6 +45,42 @@ pub struct App {
 
     /// A boolean used to signal if the help popup should be shown
     show_help: bool,
+
+    /// Current input mode
+    input_mode: InputMode,
+
+    /// The search input
+    search_input: SearchInput,
+
+    /// The cursor position
+    cursor_position: Option<(u16, u16)>,
+}
+
+/// The search input struct, used to store the search input value and the current index.
+#[derive(Debug, Default)]
+pub struct SearchInput {
+    /// The search input value
+    value: String,
+
+    /// Search input character index
+    index: usize,
+}
+
+impl SearchInput {
+    pub fn clear(&mut self) {
+        self.value.clear();
+        self.index = 0;
+    }
+
+    pub fn push(&mut self, c: char) {
+        self.value.push(c);
+        self.index += 1;
+    }
+
+    pub fn pop(&mut self) {
+        self.value.pop();
+        self.index -= 1;
+    }
 }
 
 #[derive(Debug, Default)]
@@ -138,6 +180,9 @@ impl Default for App {
             entry_list: EntryList::default(),
             current_directory: PathBuf::new(),
             show_help: false,
+            input_mode: InputMode::Normal,
+            search_input: SearchInput::default(),
+            cursor_position: None,
         }
     }
 }
@@ -222,6 +267,11 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         frame.render_widget(&mut *self, frame.area());
+
+        // After rendering, set the cursor position if needed
+        if let Some((x, y)) = self.cursor_position {
+            frame.set_cursor_position(Position::new(x, y));
+        }
     }
 
     fn render_help_popup(&self, buf: &mut Buffer) {
@@ -298,65 +348,93 @@ impl App {
             return Ok(());
         }
 
-        match key.code {
-            KeyCode::Char('?') => {
-                self.show_help = !self.show_help;
-            }
+        match self.input_mode {
+            InputMode::Normal => {
+                match key.code {
+                    KeyCode::Char('/') => {
+                        // Enter search mode
+                        self.input_mode = InputMode::Search;
+                        self.search_input.clear();
+                    }
+                    KeyCode::Char('?') => {
+                        self.show_help = !self.show_help;
+                    }
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        if self.show_help {
+                            self.show_help = false;
+                        } else {
+                            self.should_exit = true;
+                        }
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.show_help = false;
+                        self.entry_list.state.select_next();
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.show_help = false;
+                        self.entry_list.state.select_previous();
+                    }
+                    KeyCode::Char('g') | KeyCode::Home => {
+                        self.show_help = false;
+                        self.entry_list.state.select_first();
+                    }
+                    KeyCode::Char('G') | KeyCode::End => {
+                        self.show_help = false;
+                        self.entry_list.state.select_last();
+                    }
+                    KeyCode::Char('f') | KeyCode::Right => {
+                        self.show_help = false;
+                        self.change_list_mode(ListMode::Frecent)?;
+                    }
+                    KeyCode::Char('d') | KeyCode::Left => {
+                        self.show_help = false;
+                        self.change_list_mode(ListMode::Directory)?;
+                    }
+                    KeyCode::Enter => {
+                        self.show_help = false;
+                        let entry_index = self.entry_list.state.selected().unwrap_or_default();
+                        let selected_entry = &self.entry_list.items[entry_index];
 
-            KeyCode::Char('q') | KeyCode::Esc => {
-                if self.show_help {
-                    self.show_help = false;
-                } else {
-                    self.should_exit = true;
+                        if selected_entry.kind == EntryKind::Directory {
+                            // TODO: See if we can remove the clone here
+                            self.change_directory(selected_entry.path.clone())?;
+                        } else {
+                            // The user has selected a file, exit
+                            self.should_exit = true;
+                        }
+                    }
+                    // Ignore the rest
+                    _ => {}
                 }
             }
 
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.show_help = false;
-                self.entry_list.state.select_next();
-            }
-
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.show_help = false;
-                self.entry_list.state.select_previous();
-            }
-
-            KeyCode::Char('g') | KeyCode::Home => {
-                self.show_help = false;
-                self.entry_list.state.select_first();
-            }
-
-            KeyCode::Char('G') | KeyCode::End => {
-                self.show_help = false;
-                self.entry_list.state.select_last();
-            }
-
-            KeyCode::Char('f') | KeyCode::Right => {
-                self.show_help = false;
-                self.change_list_mode(ListMode::Frecent)?;
-            }
-
-            KeyCode::Char('d') | KeyCode::Left => {
-                self.show_help = false;
-                self.change_list_mode(ListMode::Directory)?;
-            }
-
-            KeyCode::Enter => {
-                self.show_help = false;
-                let entry_index = self.entry_list.state.selected().unwrap_or_default();
-                let selected_entry = &self.entry_list.items[entry_index];
-
-                if selected_entry.kind == EntryKind::Directory {
-                    // TODO: See if we can remove the clone here
-                    self.change_directory(selected_entry.path.clone())?;
-                } else {
-                    // The user has selected a file, exit
-                    self.should_exit = true;
+            // In search mode we need to handle the search input differently, we only care about
+            // the characters and the backspace key
+            InputMode::Search => {
+                match key.code {
+                    KeyCode::Enter => {
+                        // Exit search mode
+                        self.input_mode = InputMode::Normal;
+                        // TODO: Implement search here...
+                    }
+                    KeyCode::Esc => {
+                        // Exit search mode
+                        self.input_mode = InputMode::Normal;
+                    }
+                    KeyCode::Char(c) => {
+                        // Add character to the serach input
+                        self.search_input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        // Remove character from the search input
+                        if self.search_input.index > 0 {
+                            self.search_input.pop();
+                        }
+                    }
+                    // Ignore the rest
+                    _ => {}
                 }
             }
-
-            // Ignore the rest
-            _ => {}
         }
 
         Ok(())
@@ -398,10 +476,27 @@ impl App {
             .render(area, buf);
     }
 
-    fn render_footer(area: Rect, buf: &mut Buffer) {
-        Paragraph::new("Press ? for help")
-            .centered()
-            .render(area, buf);
+    fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
+        if self.input_mode == InputMode::Search {
+            let input = format!(" /{input}", input = self.search_input.value);
+
+            Paragraph::new(input)
+                .style(Style::default().fg(Color::Yellow))
+                .alignment(Alignment::Left)
+                .render(area, buf);
+
+            // Calculate the cursor poisition and account for the space and '/' characters
+            let cursor_x = area.x + 2 + self.search_input.index as u16;
+            let cursor_y = area.y;
+
+            self.cursor_position = Some((cursor_x, cursor_y));
+        } else {
+            Paragraph::new("Press ? for help")
+                .centered()
+                .render(area, buf);
+
+            self.cursor_position = None;
+        }
     }
 
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
@@ -449,8 +544,8 @@ impl Widget for &mut App {
         let [list_area] = Layout::vertical([Constraint::Fill(1)]).areas(main_area);
 
         App::render_header(header_area, buf);
-        App::render_footer(footer_area, buf);
 
+        self.render_footer(footer_area, buf);
         self.render_selected_tab_title(selected_tab_title_area, buf);
         self.render_tabs(tabs_area, buf);
         self.render_list(list_area, buf);
@@ -470,7 +565,6 @@ mod tests {
 
     fn create_test_app() -> App {
         App {
-            should_exit: false,
             current_directory: PathBuf::from("/home/user"),
             list_mode: ListMode::Directory,
             entry_list: EntryList {
@@ -488,7 +582,7 @@ mod tests {
                 ],
                 state: ListState::default(),
             },
-            show_help: false,
+            ..Default::default()
         }
     }
 
