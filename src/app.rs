@@ -304,7 +304,11 @@ impl App {
             }
 
             KeyCode::Char('q') | KeyCode::Esc => {
-                self.should_exit = true;
+                if self.show_help {
+                    self.show_help = false;
+                } else {
+                    self.should_exit = true;
+                }
             }
 
             KeyCode::Char('j') | KeyCode::Down => {
