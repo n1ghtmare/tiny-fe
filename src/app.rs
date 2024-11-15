@@ -1,6 +1,7 @@
 use std::{
-    env,
+    env, fmt,
     fs::{DirEntry, ReadDir},
+    ops::Deref,
     path::{Path, PathBuf},
 };
 
@@ -83,16 +84,69 @@ impl SearchInput {
     }
 }
 
+impl Deref for SearchInput {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl AsRef<str> for SearchInput {
+    fn as_ref(&self) -> &str {
+        &self.value
+    }
+}
+
+impl fmt::Display for SearchInput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
 #[derive(Debug, Default)]
 struct EntryList {
     items: Vec<Entry>,
     state: ListState,
+    filtered_indices: Option<Vec<usize>>,
 }
 
 impl EntryList {
     #[cfg(test)]
     fn len(&self) -> usize {
         self.items.len()
+    }
+
+    fn get_filtered_entries(&self) -> Vec<&Entry> {
+        match &self.filtered_indices {
+            Some(indices) => indices.iter().map(|&i| &self.items[i]).collect(),
+            None => self.items.iter().collect(),
+        }
+    }
+
+    fn update_filtered_indices<T: AsRef<str>>(&mut self, value: T) {
+        let value = value.as_ref().to_lowercase();
+
+        if value.is_empty() {
+            self.filtered_indices = None;
+        } else {
+            let indices = self
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(i, entry)| {
+                    if entry.name.to_lowercase().contains(&value) {
+                        Some(i)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            self.filtered_indices = Some(indices);
+        }
+
+        self.state = ListState::default();
     }
 }
 
@@ -110,7 +164,7 @@ impl TryFrom<ReadDir> for EntryList {
 
         Ok(EntryList {
             items,
-            state: ListState::default(),
+            ..Default::default()
         })
     }
 }
@@ -234,6 +288,7 @@ impl App {
         self.list_mode = ListMode::Directory;
         self.entry_list = entry_list;
         self.current_directory = path.as_ref().to_path_buf();
+        self.search_input.clear();
 
         Ok(())
     }
@@ -355,11 +410,12 @@ impl App {
                         // Enter search mode
                         self.input_mode = InputMode::Search;
                         self.search_input.clear();
+                        self.entry_list.update_filtered_indices(&self.search_input);
                     }
                     KeyCode::Char('?') => {
                         self.show_help = !self.show_help;
                     }
-                    KeyCode::Char('q') | KeyCode::Esc => {
+                    KeyCode::Char('q') => {
                         if self.show_help {
                             self.show_help = false;
                         } else {
@@ -390,10 +446,16 @@ impl App {
                         self.show_help = false;
                         self.change_list_mode(ListMode::Directory)?;
                     }
+                    KeyCode::Char('_') => {
+                        // clear the search input while in search mode
+                        self.search_input.clear();
+                        self.entry_list.update_filtered_indices(&self.search_input);
+                    }
                     KeyCode::Enter => {
                         self.show_help = false;
                         let entry_index = self.entry_list.state.selected().unwrap_or_default();
-                        let selected_entry = &self.entry_list.items[entry_index];
+                        let entries = self.entry_list.get_filtered_entries();
+                        let selected_entry = entries[entry_index];
 
                         if selected_entry.kind == EntryKind::Directory {
                             // TODO: See if we can remove the clone here
@@ -415,20 +477,26 @@ impl App {
                     KeyCode::Enter => {
                         // Exit search mode
                         self.input_mode = InputMode::Normal;
-                        // TODO: Implement search here...
                     }
                     KeyCode::Esc => {
                         // Exit search mode
                         self.input_mode = InputMode::Normal;
+                        self.search_input.clear();
+                        self.entry_list.update_filtered_indices(&self.search_input);
                     }
                     KeyCode::Char(c) => {
                         // Add character to the serach input
                         self.search_input.push(c);
+                        self.entry_list.update_filtered_indices(&self.search_input);
                     }
                     KeyCode::Backspace => {
                         // Remove character from the search input
                         if self.search_input.index > 0 {
                             self.search_input.pop();
+                            self.entry_list.update_filtered_indices(&self.search_input);
+                        } else {
+                            // Exit search mode
+                            self.input_mode = InputMode::Normal;
                         }
                     }
                     // Ignore the rest
@@ -477,9 +545,9 @@ impl App {
     }
 
     fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
-        if self.input_mode == InputMode::Search {
-            let input = format!(" /{input}", input = self.search_input.value);
+        let input = format!(" /{input}", input = self.search_input);
 
+        if self.input_mode == InputMode::Search {
             Paragraph::new(input)
                 .style(Style::default().fg(Color::Yellow))
                 .alignment(Alignment::Left)
@@ -491,9 +559,13 @@ impl App {
 
             self.cursor_position = Some((cursor_x, cursor_y));
         } else {
-            Paragraph::new("Press ? for help")
-                .centered()
-                .render(area, buf);
+            if self.search_input.is_empty() {
+                Paragraph::new("Press ? for help")
+                    .centered()
+                    .render(area, buf);
+            } else {
+                Paragraph::new(input).left_aligned().render(area, buf);
+            }
 
             self.cursor_position = None;
         }
@@ -506,23 +578,41 @@ impl App {
             .border_style(Style::new().fg(Color::DarkGray));
 
         // Iterate through all elements in the `items` and stylize them.
-        let items: Vec<ListItem> = self.entry_list.items.iter().map(ListItem::from).collect();
+        // let items: Vec<ListItem> = self.entry_list.items.iter().map(ListItem::from).collect();
+        let items: Vec<ListItem> = self
+            .entry_list
+            .get_filtered_entries()
+            .iter()
+            .map(|&x| ListItem::from(x))
+            .collect();
 
-        // Create a List from all list items and highlight the currently selected one
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(Style::new().bg(Color::Gray).fg(Color::Black))
-            .highlight_symbol(">")
-            .highlight_spacing(HighlightSpacing::Always);
+        if items.is_empty() {
+            let empty_results_text = if self.search_input.is_empty() {
+                String::from("Nothing here but digital thumbleweeds.")
+            } else {
+                format!("No results found for '{query}'", query = self.search_input)
+            };
 
-        // If no item is selected, preselect the first item
-        if self.entry_list.state.selected().is_none() {
-            self.entry_list.state.select_first();
+            Paragraph::new(empty_results_text)
+                .block(block)
+                .render(area, buf);
+        } else {
+            // Create a List from all list items and highlight the currently selected one
+            let list = List::new(items)
+                .block(block)
+                .highlight_style(Style::new().bg(Color::Gray).fg(Color::Black))
+                .highlight_symbol(">")
+                .highlight_spacing(HighlightSpacing::Always);
+
+            // If no item is selected, preselect the first item
+            if self.entry_list.state.selected().is_none() {
+                self.entry_list.state.select_first();
+            }
+
+            // We need to disambiguate this trait method as both `Widget` and `StatefulWidget` share
+            // the same method name `render`.
+            StatefulWidget::render(list, area, buf, &mut self.entry_list.state);
         }
-
-        // We need to disambiguate this trait method as both `Widget` and `StatefulWidget` share
-        // the same method name `render`.
-        StatefulWidget::render(list, area, buf, &mut self.entry_list.state);
     }
 }
 
@@ -580,7 +670,7 @@ mod tests {
                         name: ".gitignore".into(),
                     },
                 ],
-                state: ListState::default(),
+                ..Default::default()
             },
             ..Default::default()
         }
