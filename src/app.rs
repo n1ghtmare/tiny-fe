@@ -370,8 +370,12 @@ impl App {
                 Span::raw(" - Toggle help"),
             ]),
             Line::from(vec![
-                Span::styled("> q or Esc", Style::default().fg(Color::Yellow)),
+                Span::styled("> q", Style::default().fg(Color::Yellow)),
                 Span::raw(" - Quit"),
+            ]),
+            Line::from(vec![
+                Span::styled("> /", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Search"),
             ]),
         ]))
         .reset()
@@ -406,6 +410,9 @@ impl App {
         match self.input_mode {
             InputMode::Normal => {
                 match key.code {
+                    KeyCode::Esc => {
+                        self.show_help = false;
+                    }
                     KeyCode::Char('/') => {
                         // Enter search mode
                         self.input_mode = InputMode::Search;
@@ -416,9 +423,7 @@ impl App {
                         self.show_help = !self.show_help;
                     }
                     KeyCode::Char('q') => {
-                        if self.show_help {
-                            self.show_help = false;
-                        } else {
+                        if !self.show_help {
                             self.should_exit = true;
                         }
                     }
