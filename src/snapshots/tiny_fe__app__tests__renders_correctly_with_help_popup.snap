@@ -18,7 +18,7 @@ snapshot_kind: text
 "┃                   │(f)recent                             │                   ┃"
 "┃                   │> Enter - Select item                 │                   ┃"
 "┃                   │> ? - Toggle help                     │                   ┃"
-"┃                   │> q - Quit                            │                   ┃"
+"┃                   │> q or Esc - Quit                     │                   ┃"
 "┃                   │> / - Search                          │                   ┃"
 "┃                   └──────────────────────────────────────┘                   ┃"
 "┃                                                                              ┃"
