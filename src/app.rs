@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     env, fmt,
     fs::{DirEntry, ReadDir},
     ops::Deref,
@@ -9,6 +10,15 @@ use anyhow::Ok;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{prelude::*, widgets::*, DefaultTerminal};
 use symbols::border;
+
+/// The preferred shortcuts for the entries in the list. These will be used to quickly jump to an
+/// entry and will be chosed based on the order that they appear in this array, this way we can
+/// prioritize ergonomics. In future versions, we might allow the user to customize these
+/// shortcuts.
+const PREFERRED_ENTRY_SHORTCUTS: [char; 29] = [
+    'a', 's', 'w', 'e', 'r', 't', 'z', 'x', 'c', 'v', 'b', 'y', 'u', 'i', 'o', 'p', 'n', 'm', ',',
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+];
 
 /// Enum representing whether the system is currently showing a directory listing or paths from the
 /// database.
@@ -41,6 +51,9 @@ pub struct App {
     /// A list representing the entries in the current working directory
     entry_list: EntryList,
 
+    /// The list state, used to keep track of the selected item
+    list_state: ListState,
+
     /// The current directory that the user is in
     current_directory: PathBuf,
 
@@ -55,6 +68,9 @@ pub struct App {
 
     /// The cursor position
     cursor_position: Option<(u16, u16)>,
+
+    /// The map of shortcuts to entry indices
+    shortcuts: HashMap<char, usize>,
 }
 
 /// The search input struct, used to store the search input value and the current index.
@@ -107,7 +123,6 @@ impl fmt::Display for SearchInput {
 #[derive(Debug, Default)]
 struct EntryList {
     items: Vec<Entry>,
-    state: ListState,
     filtered_indices: Option<Vec<usize>>,
 }
 
@@ -145,8 +160,6 @@ impl EntryList {
 
             self.filtered_indices = Some(indices);
         }
-
-        self.state = ListState::default();
     }
 }
 
@@ -174,6 +187,84 @@ struct Entry {
     path: PathBuf,
     kind: EntryKind,
     name: String,
+}
+
+/// This struct represents the data that will be used to render an entry in the list. It is used in
+/// conjunction with the search query to determine how to render the entry.
+///
+/// It holds the prefix, search hit and suffix of the entry name, the next character after the
+/// search hit, the kind of the entry and the shortcut assigned to the entry.
+///
+/// This allows us to render the entry in the UI with the search hit underlined and the shortcut
+/// displayed next to the entry.
+///
+/// For example, if the entry name is "Cargo.toml" and the search query is "ar", the prefix will be
+/// "C", the search hit will be "ar", the suffix will be "go.toml", the next character will be "g"
+/// (the character immediately after the search hit)
+///
+/// The shortcut is assigned at a later stage and is used to quickly jump to the entry.
+#[derive(Debug, PartialEq)]
+struct EntryRenderData<'a> {
+    /// A boolean indicating if the entry is dynamic (e.g., "..", which is not a "real" entry)
+    is_dynamic: bool,
+    prefix: &'a str,
+    search_hit: &'a str,
+    suffix: &'a str,
+    /// The next character immediately after the search hit
+    next_char: Option<char>,
+    /// The kind of the entry, we need to keep track of this because we render directories
+    /// differently than files
+    kind: &'a EntryKind,
+    /// The shortcut assigned to the entry, it's an optional character, some entries might not have
+    /// a shortcut (files don't have shortcuts)
+    shortcut: Option<char>,
+}
+
+impl EntryRenderData<'_> {
+    pub fn from_entry<T: AsRef<str>>(entry: &Entry, search_query: T) -> EntryRenderData {
+        if entry.name == ".." {
+            return EntryRenderData {
+                is_dynamic: true,
+                prefix: &entry.name,
+                search_hit: "",
+                suffix: "",
+                next_char: None,
+                kind: &EntryKind::Directory,
+                shortcut: None,
+            };
+        }
+
+        let search_query = search_query.as_ref();
+        let name = entry.name.to_lowercase();
+        let search_query = search_query.to_lowercase();
+
+        if let Some(index) = name.find(&search_query) {
+            let prefix = &entry.name[..index];
+            let search_hit = &entry.name[index..(index + search_query.len())];
+            let suffix = &entry.name[(index + search_query.len())..];
+            let next_char = suffix.chars().next();
+
+            EntryRenderData {
+                is_dynamic: false,
+                prefix,
+                search_hit,
+                suffix,
+                next_char,
+                kind: &entry.kind,
+                shortcut: None,
+            }
+        } else {
+            EntryRenderData {
+                is_dynamic: false,
+                prefix: &entry.name,
+                search_hit: "",
+                suffix: "",
+                next_char: entry.name.chars().next(),
+                kind: &entry.kind,
+                shortcut: None,
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -214,14 +305,37 @@ impl TryFrom<DirEntry> for Entry {
     }
 }
 
-impl From<&Entry> for ListItem<'_> {
-    fn from(value: &Entry) -> Self {
-        if value.kind == EntryKind::Directory {
+impl<'a> From<EntryRenderData<'a>> for ListItem<'a> {
+    fn from(value: EntryRenderData<'a>) -> Self {
+        let mut spans: Vec<Span> = Vec::new();
+
+        // we want to display the search hit with underscore
+        spans.push(Span::raw(value.prefix));
+        spans.push(Span::styled(
+            value.search_hit,
+            Style::default().underlined(),
+        ));
+        spans.push(Span::raw(value.suffix));
+
+        if value.kind == &EntryKind::Directory {
+            spans.push(Span::raw("/"));
+
+            if let Some(shortcut) = value.shortcut {
+                spans.push(Span::raw("  ").style(Style::default().dark_gray()));
+                spans.push(Span::styled(
+                    shortcut.to_string(),
+                    Style::default().black().on_green(),
+                ));
+            }
+
+            let line = Line::from(spans);
             let style = Style::new().bold().fg(Color::White);
-            ListItem::new(format!("{name}/", name = value.name)).style(style)
+
+            ListItem::new(line).style(style)
         } else {
             let style = Style::new().dark_gray();
-            ListItem::new(value.name.clone()).style(style)
+            let k = Line::from(spans);
+            ListItem::new(k).style(style)
         }
     }
 }
@@ -232,11 +346,13 @@ impl Default for App {
             should_exit: false,
             list_mode: ListMode::Directory,
             entry_list: EntryList::default(),
+            list_state: ListState::default(),
             current_directory: PathBuf::new(),
             show_help: false,
             input_mode: InputMode::Normal,
             search_input: SearchInput::default(),
             cursor_position: None,
+            shortcuts: HashMap::new(),
         }
     }
 }
@@ -402,6 +518,27 @@ impl App {
         Ok(())
     }
 
+    fn change_directory_to_entry_index(&mut self, index: usize) -> anyhow::Result<()> {
+        let entries = self.entry_list.get_filtered_entries();
+        let selected_entry = entries.get(index);
+
+        if let Some(selected_entry) = selected_entry {
+            if selected_entry.kind == EntryKind::Directory {
+                self.change_directory(selected_entry.path.clone())?;
+            } else {
+                // The user has selected a file, exit
+                self.should_exit = true;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn update_filtered_indices(&mut self) {
+        self.entry_list.update_filtered_indices(&self.search_input);
+        self.list_state = ListState::default();
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent) -> anyhow::Result<()> {
         if key.kind != KeyEventKind::Press {
             return Ok(());
@@ -414,7 +551,7 @@ impl App {
                         // Enter search mode
                         self.input_mode = InputMode::Search;
                         self.search_input.clear();
-                        self.entry_list.update_filtered_indices(&self.search_input);
+                        self.update_filtered_indices();
                     }
                     KeyCode::Char('?') => {
                         self.show_help = !self.show_help;
@@ -428,19 +565,19 @@ impl App {
                     }
                     KeyCode::Char('j') | KeyCode::Down => {
                         self.show_help = false;
-                        self.entry_list.state.select_next();
+                        self.list_state.select_next();
                     }
                     KeyCode::Char('k') | KeyCode::Up => {
                         self.show_help = false;
-                        self.entry_list.state.select_previous();
+                        self.list_state.select_previous();
                     }
                     KeyCode::Char('g') | KeyCode::Home => {
                         self.show_help = false;
-                        self.entry_list.state.select_first();
+                        self.list_state.select_first();
                     }
                     KeyCode::Char('G') | KeyCode::End => {
                         self.show_help = false;
-                        self.entry_list.state.select_last();
+                        self.list_state.select_last();
                     }
                     KeyCode::Char('f') | KeyCode::Right => {
                         self.show_help = false;
@@ -453,21 +590,18 @@ impl App {
                     KeyCode::Char('_') => {
                         // clear the search input while in search mode
                         self.search_input.clear();
-                        self.entry_list.update_filtered_indices(&self.search_input);
+                        self.update_filtered_indices();
+                    }
+                    KeyCode::Char(c) => {
+                        // find the entry with the shortcut (if one exists) and select it
+                        if let Some(entry_index) = self.shortcuts.get(&c) {
+                            self.change_directory_to_entry_index(*entry_index)?;
+                        }
                     }
                     KeyCode::Enter => {
                         self.show_help = false;
-                        let entry_index = self.entry_list.state.selected().unwrap_or_default();
-                        let entries = self.entry_list.get_filtered_entries();
-                        let selected_entry = entries[entry_index];
-
-                        if selected_entry.kind == EntryKind::Directory {
-                            // TODO: See if we can remove the clone here
-                            self.change_directory(selected_entry.path.clone())?;
-                        } else {
-                            // The user has selected a file, exit
-                            self.should_exit = true;
-                        }
+                        let entry_index = self.list_state.selected().unwrap_or_default();
+                        self.change_directory_to_entry_index(entry_index)?;
                     }
                     // Ignore the rest
                     _ => {}
@@ -486,18 +620,25 @@ impl App {
                         // Exit search mode
                         self.input_mode = InputMode::Normal;
                         self.search_input.clear();
-                        self.entry_list.update_filtered_indices(&self.search_input);
+                        self.update_filtered_indices();
                     }
                     KeyCode::Char(c) => {
-                        // Add character to the serach input
-                        self.search_input.push(c);
-                        self.entry_list.update_filtered_indices(&self.search_input);
+                        // find the entry with the shortcut (if one exists) and select it
+                        if let Some(entry_index) = self.shortcuts.get(&c) {
+                            self.change_directory_to_entry_index(*entry_index)?;
+                            self.input_mode = InputMode::Normal;
+                            self.search_input.clear();
+                        } else {
+                            // Add character to the search input
+                            self.search_input.push(c);
+                            self.update_filtered_indices();
+                        }
                     }
                     KeyCode::Backspace => {
                         // Remove character from the search input
                         if self.search_input.index > 0 {
                             self.search_input.pop();
-                            self.entry_list.update_filtered_indices(&self.search_input);
+                            self.update_filtered_indices();
                         } else {
                             // Exit search mode
                             self.input_mode = InputMode::Normal;
@@ -581,14 +722,47 @@ impl App {
             .border_set(border::THICK)
             .border_style(Style::new().fg(Color::DarkGray));
 
-        // Iterate through all elements in the `items` and stylize them.
-        // let items: Vec<ListItem> = self.entry_list.items.iter().map(ListItem::from).collect();
-        let items: Vec<ListItem> = self
-            .entry_list
-            .get_filtered_entries()
-            .iter()
-            .map(|&x| ListItem::from(x))
+        let entries = self.entry_list.get_filtered_entries();
+
+        let mut entry_render_data: Vec<EntryRenderData> = entries
+            .into_iter()
+            .map(|x| EntryRenderData::from_entry(x, &self.search_input))
             .collect();
+
+        // TODO: Move the shortcuts logic to a separate module
+
+        // Collect all the next_chars for the entries, they should all be illegal shortcuts
+        let illegal_shortcuts = entry_render_data
+            .iter()
+            .filter_map(|x| x.next_char)
+            .collect::<HashSet<_>>();
+
+        // Reset the shortcuts
+        self.shortcuts.clear();
+
+        for (i, data) in entry_render_data.iter_mut().enumerate() {
+            if data.kind != &EntryKind::Directory || data.is_dynamic {
+                // We only assign shortcuts to directories since you can't jump "into" files
+                // Also, we don't assign shortcuts to dynamic entries (like "..")
+                continue;
+            }
+
+            // Assign a shortcut to the entry
+            for shortcut in PREFERRED_ENTRY_SHORTCUTS.iter() {
+                if !self.shortcuts.contains_key(shortcut) && !illegal_shortcuts.contains(shortcut) {
+                    data.shortcut = Some(*shortcut);
+                    self.shortcuts.insert(*shortcut, i);
+                    break;
+                }
+            }
+
+            if self.shortcuts.len() + illegal_shortcuts.len() >= PREFERRED_ENTRY_SHORTCUTS.len() {
+                // We've assigned all the possible shortcuts, we can iterating stop now
+                break;
+            }
+        }
+
+        let items: Vec<ListItem> = entry_render_data.into_iter().map(ListItem::from).collect();
 
         if items.is_empty() {
             let empty_results_text = if self.search_input.is_empty() {
@@ -609,13 +783,13 @@ impl App {
                 .highlight_spacing(HighlightSpacing::Always);
 
             // If no item is selected, preselect the first item
-            if self.entry_list.state.selected().is_none() {
-                self.entry_list.state.select_first();
+            if self.list_state.selected().is_none() {
+                self.list_state.select_first();
             }
 
             // We need to disambiguate this trait method as both `Widget` and `StatefulWidget` share
             // the same method name `render`.
-            StatefulWidget::render(list, area, buf, &mut self.entry_list.state);
+            StatefulWidget::render(list, area, buf, &mut self.list_state);
         }
     }
 }
@@ -664,6 +838,11 @@ mod tests {
             entry_list: EntryList {
                 items: vec![
                     Entry {
+                        path: PathBuf::from("/home/"),
+                        kind: EntryKind::Directory,
+                        name: "..".into(),
+                    },
+                    Entry {
                         path: PathBuf::from("/home/user/.git/"),
                         kind: EntryKind::Directory,
                         name: ".git".into(),
@@ -678,6 +857,70 @@ mod tests {
             },
             ..Default::default()
         }
+    }
+
+    // TODO: Move this to a separate "entry" module
+    #[test]
+    fn parse_render_data() {
+        let entry = Entry {
+            name: "Cargo.toml".into(),
+            kind: EntryKind::File {
+                extension: Some("toml".into()),
+            },
+            path: PathBuf::from("/home/user/Cargo.toml"),
+        };
+
+        let fragments: EntryRenderData = EntryRenderData::from_entry(&entry, "car");
+
+        // TODO: Implement Default for EntryRenderData
+        assert_eq!(
+            fragments,
+            EntryRenderData {
+                is_dynamic: false,
+                prefix: "",
+                search_hit: "Car",
+                suffix: "go.toml",
+                next_char: Some('g'),
+                kind: &EntryKind::File {
+                    extension: Some("toml".into())
+                },
+                shortcut: None,
+            }
+        );
+
+        let fragments: EntryRenderData = EntryRenderData::from_entry(&entry, "toml");
+
+        assert_eq!(
+            fragments,
+            EntryRenderData {
+                is_dynamic: false,
+                prefix: "Cargo.",
+                search_hit: "toml",
+                suffix: "",
+                next_char: None,
+                kind: &EntryKind::File {
+                    extension: Some("toml".into())
+                },
+                shortcut: None,
+            }
+        );
+
+        let fragments: EntryRenderData = EntryRenderData::from_entry(&entry, "argo");
+
+        assert_eq!(
+            fragments,
+            EntryRenderData {
+                is_dynamic: false,
+                prefix: "C",
+                search_hit: "argo",
+                suffix: ".toml",
+                next_char: Some('.'),
+                kind: &EntryKind::File {
+                    extension: Some("toml".into())
+                },
+                shortcut: None,
+            }
+        );
     }
 
     #[test]
@@ -774,19 +1017,19 @@ mod tests {
         let mut app = create_test_app();
         let mut buffer = Buffer::empty(Rect::new(0, 0, 79, 10));
 
-        assert_eq!(app.entry_list.state.selected(), None);
+        assert_eq!(app.list_state.selected(), None);
 
         app.render(buffer.area, &mut buffer);
 
-        assert_eq!(app.entry_list.state.selected(), Some(0));
+        assert_eq!(app.list_state.selected(), Some(0));
     }
 
     #[test]
     fn handle_key_event() {
         let mut app = create_test_app();
 
-        // Make sure we have 2 items
-        assert_eq!(app.entry_list.len(), 2);
+        // Make sure we have 3 items
+        assert_eq!(app.entry_list.len(), 3);
 
         let _ = app.handle_key_event(KeyCode::Char('q').into());
         assert!(app.should_exit);
@@ -795,31 +1038,31 @@ mod tests {
         assert!(app.should_exit);
 
         let _ = app.handle_key_event(KeyCode::Char('j').into());
-        assert_eq!(app.entry_list.state.selected(), Some(0));
+        assert_eq!(app.list_state.selected(), Some(0));
 
         let _ = app.handle_key_event(KeyCode::Down.into());
-        assert_eq!(app.entry_list.state.selected(), Some(1));
+        assert_eq!(app.list_state.selected(), Some(1));
 
         // press down so that we can go back up more than once
         let _ = app.handle_key_event(KeyCode::Down.into());
 
         let _ = app.handle_key_event(KeyCode::Char('k').into());
-        assert_eq!(app.entry_list.state.selected(), Some(1));
+        assert_eq!(app.list_state.selected(), Some(1));
 
         let _ = app.handle_key_event(KeyCode::Up.into());
-        assert_eq!(app.entry_list.state.selected(), Some(0));
+        assert_eq!(app.list_state.selected(), Some(0));
 
         let _ = app.handle_key_event(KeyCode::Char('G').into());
-        assert_eq!(app.entry_list.state.selected(), Some(usize::MAX));
+        assert_eq!(app.list_state.selected(), Some(usize::MAX));
 
         let _ = app.handle_key_event(KeyCode::Char('g').into());
-        assert_eq!(app.entry_list.state.selected(), Some(0));
+        assert_eq!(app.list_state.selected(), Some(0));
 
         let _ = app.handle_key_event(KeyCode::End.into());
-        assert_eq!(app.entry_list.state.selected(), Some(usize::MAX));
+        assert_eq!(app.list_state.selected(), Some(usize::MAX));
 
         let _ = app.handle_key_event(KeyCode::Home.into());
-        assert_eq!(app.entry_list.state.selected(), Some(0));
+        assert_eq!(app.list_state.selected(), Some(0));
 
         let _ = app.handle_key_event(KeyCode::Char('d').into());
         assert_eq!(app.list_mode, ListMode::Directory);
