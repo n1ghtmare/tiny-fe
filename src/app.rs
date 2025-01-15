@@ -1,5 +1,4 @@
 use std::{
-    collections::{HashMap, HashSet},
     env, fmt,
     ops::Deref,
     path::{Path, PathBuf},
@@ -10,16 +9,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{prelude::*, widgets::*, DefaultTerminal};
 use symbols::border;
 
-use crate::entry::{Entry, EntryKind, EntryList, EntryRenderData};
-
-/// The preferred shortcuts for the entries in the list. These will be used to quickly jump to an
-/// entry and will be chosed based on the order that they appear in this array, this way we can
-/// prioritize ergonomics. In future versions, we might allow the user to customize these
-/// shortcuts.
-const PREFERRED_ENTRY_SHORTCUTS: [char; 29] = [
-    'a', 's', 'w', 'e', 'r', 't', 'z', 'x', 'c', 'v', 'b', 'y', 'u', 'i', 'o', 'p', 'n', 'm', ',',
-    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
-];
+use crate::entry::{Entry, EntryKind, EntryList, EntryRenderData, EntryShortcutRegistry};
 
 /// Enum representing whether the system is currently showing a directory listing or paths from the
 /// database.
@@ -70,8 +60,8 @@ pub struct App {
     /// The cursor position
     cursor_position: Option<(u16, u16)>,
 
-    /// The map of shortcuts to entry indices
-    shortcuts: HashMap<char, usize>,
+    /// The shortcuts for the entries
+    entry_shortcut_registry: EntryShortcutRegistry,
 }
 
 /// The search input struct, used to store the search input value and the current index.
@@ -133,7 +123,7 @@ impl Default for App {
             input_mode: InputMode::Normal,
             search_input: SearchInput::default(),
             cursor_position: None,
-            shortcuts: HashMap::new(),
+            entry_shortcut_registry: EntryShortcutRegistry::default(),
         }
     }
 }
@@ -375,7 +365,7 @@ impl App {
                     }
                     KeyCode::Char(c) => {
                         // find the entry with the shortcut (if one exists) and select it
-                        if let Some(entry_index) = self.shortcuts.get(&c) {
+                        if let Some(entry_index) = self.entry_shortcut_registry.get(&c) {
                             self.change_directory_to_entry_index(*entry_index)?;
                         }
                     }
@@ -405,7 +395,7 @@ impl App {
                     }
                     KeyCode::Char(c) => {
                         // find the entry with the shortcut (if one exists) and select it
-                        if let Some(entry_index) = self.shortcuts.get(&c) {
+                        if let Some(entry_index) = self.entry_shortcut_registry.get(&c) {
                             self.change_directory_to_entry_index(*entry_index)?;
                             self.input_mode = InputMode::Normal;
                             self.search_input.clear();
@@ -510,38 +500,8 @@ impl App {
             .map(|x| EntryRenderData::from_entry(x, &self.search_input))
             .collect();
 
-        // TODO: Move the shortcuts logic to a separate module
-
-        // Collect all the next_chars for the entries, they should all be illegal shortcuts
-        let illegal_shortcuts = entry_render_data
-            .iter()
-            .filter_map(|x| x.next_char)
-            .collect::<HashSet<_>>();
-
-        // Reset the shortcuts
-        self.shortcuts.clear();
-
-        for (i, data) in entry_render_data.iter_mut().enumerate() {
-            if data.kind != &EntryKind::Directory || data.is_dynamic {
-                // We only assign shortcuts to directories since you can't jump "into" files
-                // Also, we don't assign shortcuts to dynamic entries (like "..")
-                continue;
-            }
-
-            // Assign a shortcut to the entry
-            for shortcut in PREFERRED_ENTRY_SHORTCUTS.iter() {
-                if !self.shortcuts.contains_key(shortcut) && !illegal_shortcuts.contains(shortcut) {
-                    data.shortcut = Some(*shortcut);
-                    self.shortcuts.insert(*shortcut, i);
-                    break;
-                }
-            }
-
-            if self.shortcuts.len() + illegal_shortcuts.len() >= PREFERRED_ENTRY_SHORTCUTS.len() {
-                // We've assigned all the possible shortcuts, we can iterating stop now
-                break;
-            }
-        }
+        self.entry_shortcut_registry
+            .assign_shortcuts(&mut entry_render_data);
 
         let items: Vec<ListItem> = entry_render_data.into_iter().map(ListItem::from).collect();
 

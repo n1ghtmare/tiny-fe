@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     fs::{DirEntry, ReadDir},
     path::PathBuf,
 };
@@ -91,6 +92,18 @@ impl EntryRenderData<'_> {
                 suffix: "",
                 next_char: None,
                 kind: &EntryKind::Directory,
+                shortcut: None,
+            };
+        }
+
+        if search_query.as_ref().is_empty() {
+            return EntryRenderData {
+                is_dynamic: false,
+                prefix: &entry.name,
+                search_hit: "",
+                suffix: "",
+                next_char: entry.name.chars().next(),
+                kind: &entry.kind,
                 shortcut: None,
             };
         }
@@ -225,69 +238,504 @@ impl TryFrom<ReadDir> for EntryList {
     }
 }
 
+/// The preferred shortcuts for the entries in the list. These will be used to quickly jump to an
+/// entry and will be chosed based on the order that they appear in this array, this way we can
+/// prioritize ergonomics. In future versions, we might allow the user to customize these
+/// shortcuts.
+const PREFERRED_SHORTCUTS: [char; 29] = [
+    'a', 's', 'w', 'e', 'r', 't', 'z', 'x', 'c', 'v', 'b', 'y', 'u', 'i', 'o', 'p', 'n', 'm', ',',
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+];
+
+#[derive(Debug)]
+pub struct EntryShortcutRegistry {
+    /// The map of shortcuts to entry indices
+    shortcuts: HashMap<char, usize>,
+    preferred_shortcuts: &'static [char],
+}
+
+impl Default for EntryShortcutRegistry {
+    fn default() -> Self {
+        EntryShortcutRegistry {
+            shortcuts: HashMap::new(),
+            preferred_shortcuts: &PREFERRED_SHORTCUTS,
+        }
+    }
+}
+
+impl EntryShortcutRegistry {
+    pub fn with_custom_preferred_shortcuts(preferred_shortcuts: &'static [char]) -> Self {
+        EntryShortcutRegistry {
+            shortcuts: HashMap::new(),
+            preferred_shortcuts,
+        }
+    }
+
+    pub fn get(&self, shortcut: &char) -> Option<&usize> {
+        self.shortcuts.get(shortcut)
+    }
+
+    pub fn assign_shortcuts(&mut self, entry_render_data: &mut [EntryRenderData]) {
+        // Reset the shortcuts
+        self.shortcuts.clear();
+
+        // Collect all the next_chars for the entries, they should all be illegal shortcuts
+        let illegal_shortcuts = entry_render_data
+            .iter()
+            .filter_map(|x| x.next_char)
+            .collect::<HashSet<_>>();
+
+        // TODO: Revisit this and see if: a) we can make it more efficient OR b) remove the early
+        // break in the loop where this is used
+        // Illegal shortcuts that are in the preferred shortcuts
+        let illegal_shortcuts_in_preferred_count = illegal_shortcuts
+            .iter()
+            .filter(|x| self.preferred_shortcuts.contains(x))
+            .count();
+
+        for (i, data) in entry_render_data.iter_mut().enumerate() {
+            if data.kind != &EntryKind::Directory || data.is_dynamic {
+                // We only assign shortcuts to directories since you can't jump "into" files
+                // Also, we don't assign shortcuts to dynamic entries (like "..")
+                continue;
+            }
+
+            // Assign a shortcut to the entry
+            for shortcut in self.preferred_shortcuts.iter() {
+                if !self.shortcuts.contains_key(shortcut) && !illegal_shortcuts.contains(shortcut) {
+                    data.shortcut = Some(*shortcut);
+                    self.shortcuts.insert(*shortcut, i);
+                    break;
+                }
+            }
+
+            if self.shortcuts.len() + illegal_shortcuts_in_preferred_count
+                >= self.preferred_shortcuts.len()
+            {
+                // We've assigned all the possible shortcuts, we can iterating stop now
+                break;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn entry_render_data_from_entry_works_correctly_with_search_query() {
-        let entry = Entry {
-            name: "Cargo.toml".into(),
-            kind: EntryKind::File {
-                extension: Some("toml".into()),
-            },
-            path: PathBuf::from("/home/user/Cargo.toml"),
-        };
+    mod entry_shortcut_registry {
+        use super::*;
 
-        let fragments: EntryRenderData = EntryRenderData::from_entry(&entry, "car");
-
-        assert_eq!(
-            fragments,
-            EntryRenderData {
-                is_dynamic: false,
-                prefix: "",
-                search_hit: "Car",
-                suffix: "go.toml",
-                next_char: Some('g'),
-                kind: &EntryKind::File {
-                    extension: Some("toml".into())
+        #[test]
+        pub fn assign_works_correctly_with_defaults() {
+            let entries = [
+                Entry {
+                    name: "s-dir1".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/s-dir/"),
                 },
-                shortcut: None,
-            }
-        );
-
-        let fragments: EntryRenderData = EntryRenderData::from_entry(&entry, "toml");
-
-        assert_eq!(
-            fragments,
-            EntryRenderData {
-                is_dynamic: false,
-                prefix: "Cargo.",
-                search_hit: "toml",
-                suffix: "",
-                next_char: None,
-                kind: &EntryKind::File {
-                    extension: Some("toml".into())
+                Entry {
+                    name: "d-dir2".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/d-dir/"),
                 },
-                shortcut: None,
-            }
-        );
-
-        let fragments: EntryRenderData = EntryRenderData::from_entry(&entry, "argo");
-
-        assert_eq!(
-            fragments,
-            EntryRenderData {
-                is_dynamic: false,
-                prefix: "C",
-                search_hit: "argo",
-                suffix: ".toml",
-                next_char: Some('.'),
-                kind: &EntryKind::File {
-                    extension: Some("toml".into())
+                Entry {
+                    name: "w-dir3".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/w-dir/"),
                 },
-                shortcut: None,
-            }
-        );
+                Entry {
+                    name: "e-dir4".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/e-dir/"),
+                },
+                Entry {
+                    name: "r-dir5".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/Cargo.toml"),
+                },
+                Entry {
+                    name: "Cargo.toml".into(),
+                    kind: EntryKind::File {
+                        extension: Some("toml".into()),
+                    },
+                    path: PathBuf::from("/home/user/Cargo.toml"),
+                },
+            ];
+
+            let mut entry_render_data: Vec<EntryRenderData> = entries
+                .iter()
+                .map(|entry| EntryRenderData::from_entry(entry, ""))
+                .collect();
+
+            let mut entry_shortcut_registry = EntryShortcutRegistry::default();
+
+            entry_shortcut_registry.assign_shortcuts(&mut entry_render_data);
+
+            assert_eq!(
+                entry_render_data,
+                vec![
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "s-dir1",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('s'),
+                        kind: &EntryKind::Directory,
+                        shortcut: Some('a'),
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "d-dir2",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('d'),
+                        kind: &EntryKind::Directory,
+                        shortcut: Some('t'),
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "w-dir3",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('w'),
+                        kind: &EntryKind::Directory,
+                        shortcut: Some('z'),
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "e-dir4",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('e'),
+                        kind: &EntryKind::Directory,
+                        shortcut: Some('x'),
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "r-dir5",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('r'),
+                        kind: &EntryKind::Directory,
+                        shortcut: Some('c'),
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "Cargo.toml",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('C'),
+                        kind: &EntryKind::File {
+                            extension: Some("toml".into())
+                        },
+                        shortcut: None,
+                    },
+                ]
+            );
+        }
+
+        #[test]
+        fn assign_works_correctly_with_custom_preferred_shortcuts_single() {
+            let entries = [
+                Entry {
+                    name: "a-dir1".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/a-dir/"),
+                },
+                Entry {
+                    name: "d-dir2".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/d-dir/"),
+                },
+                Entry {
+                    name: "w-dir3".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/w-dir/"),
+                },
+                Entry {
+                    name: "e-dir4".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/e-dir/"),
+                },
+                Entry {
+                    name: "r-dir5".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/Cargo.toml"),
+                },
+                Entry {
+                    name: "Cargo.toml".into(),
+                    kind: EntryKind::File {
+                        extension: Some("toml".into()),
+                    },
+                    path: PathBuf::from("/home/user/Cargo.toml"),
+                },
+            ];
+
+            let mut entry_render_data: Vec<EntryRenderData> = entries
+                .iter()
+                .map(|entry| EntryRenderData::from_entry(entry, ""))
+                .collect();
+
+            let mut entry_shortcut_registry =
+                EntryShortcutRegistry::with_custom_preferred_shortcuts(&['a', 't']);
+
+            entry_shortcut_registry.assign_shortcuts(&mut entry_render_data);
+
+            assert_eq!(
+                entry_render_data,
+                vec![
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "a-dir1",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('a'),
+                        kind: &EntryKind::Directory,
+                        shortcut: Some('t'),
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "d-dir2",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('d'),
+                        kind: &EntryKind::Directory,
+                        shortcut: None,
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "w-dir3",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('w'),
+                        kind: &EntryKind::Directory,
+                        shortcut: None,
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "e-dir4",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('e'),
+                        kind: &EntryKind::Directory,
+                        shortcut: None,
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "r-dir5",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('r'),
+                        kind: &EntryKind::Directory,
+                        shortcut: None,
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "Cargo.toml",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('C'),
+                        kind: &EntryKind::File {
+                            extension: Some("toml".into())
+                        },
+                        shortcut: None,
+                    },
+                ]
+            );
+        }
+
+        #[test]
+        fn assign_works_correctly_with_custom_preferred_shortcuts_max() {
+            let entries = [
+                Entry {
+                    name: "s-dir1".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/a-dir/"),
+                },
+                Entry {
+                    name: "d-dir2".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/d-dir/"),
+                },
+                Entry {
+                    name: "w-dir3".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/w-dir/"),
+                },
+                Entry {
+                    name: "e-dir4".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/e-dir/"),
+                },
+                Entry {
+                    name: "r-dir5".into(),
+                    kind: EntryKind::Directory,
+                    path: PathBuf::from("/home/user/Cargo.toml"),
+                },
+                Entry {
+                    name: "Cargo.toml".into(),
+                    kind: EntryKind::File {
+                        extension: Some("toml".into()),
+                    },
+                    path: PathBuf::from("/home/user/Cargo.toml"),
+                },
+            ];
+
+            let mut entry_render_data: Vec<EntryRenderData> = entries
+                .iter()
+                .map(|entry| EntryRenderData::from_entry(entry, ""))
+                .collect();
+
+            let mut entry_shortcut_registry =
+                EntryShortcutRegistry::with_custom_preferred_shortcuts(&['a', 't']);
+
+            entry_shortcut_registry.assign_shortcuts(&mut entry_render_data);
+
+            assert_eq!(
+                entry_render_data,
+                vec![
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "s-dir1",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('s'),
+                        kind: &EntryKind::Directory,
+                        shortcut: Some('a'),
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "d-dir2",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('d'),
+                        kind: &EntryKind::Directory,
+                        shortcut: Some('t'),
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "w-dir3",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('w'),
+                        kind: &EntryKind::Directory,
+                        shortcut: None,
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "e-dir4",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('e'),
+                        kind: &EntryKind::Directory,
+                        shortcut: None,
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "r-dir5",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('r'),
+                        kind: &EntryKind::Directory,
+                        shortcut: None,
+                    },
+                    EntryRenderData {
+                        is_dynamic: false,
+                        prefix: "Cargo.toml",
+                        search_hit: "",
+                        suffix: "",
+                        next_char: Some('C'),
+                        kind: &EntryKind::File {
+                            extension: Some("toml".into())
+                        },
+                        shortcut: None,
+                    },
+                ]
+            );
+        }
+    }
+
+    mod entry_render_data {
+        use super::*;
+
+        #[test]
+        fn entry_render_data_from_entry_works_correctly_with_search_query() {
+            let entry = Entry {
+                name: "Cargo.toml".into(),
+                kind: EntryKind::File {
+                    extension: Some("toml".into()),
+                },
+                path: PathBuf::from("/home/user/Cargo.toml"),
+            };
+
+            let entry_render_data: EntryRenderData = EntryRenderData::from_entry(&entry, "car");
+
+            assert_eq!(
+                entry_render_data,
+                EntryRenderData {
+                    is_dynamic: false,
+                    prefix: "",
+                    search_hit: "Car",
+                    suffix: "go.toml",
+                    next_char: Some('g'),
+                    kind: &EntryKind::File {
+                        extension: Some("toml".into())
+                    },
+                    shortcut: None,
+                }
+            );
+
+            let entry_render_data: EntryRenderData = EntryRenderData::from_entry(&entry, "toml");
+
+            assert_eq!(
+                entry_render_data,
+                EntryRenderData {
+                    is_dynamic: false,
+                    prefix: "Cargo.",
+                    search_hit: "toml",
+                    suffix: "",
+                    next_char: None,
+                    kind: &EntryKind::File {
+                        extension: Some("toml".into())
+                    },
+                    shortcut: None,
+                }
+            );
+
+            let entry_render_data: EntryRenderData = EntryRenderData::from_entry(&entry, "argo");
+
+            assert_eq!(
+                entry_render_data,
+                EntryRenderData {
+                    is_dynamic: false,
+                    prefix: "C",
+                    search_hit: "argo",
+                    suffix: ".toml",
+                    next_char: Some('.'),
+                    kind: &EntryKind::File {
+                        extension: Some("toml".into())
+                    },
+                    shortcut: None,
+                }
+            );
+
+            let entry_render_data: EntryRenderData = EntryRenderData::from_entry(&entry, "");
+
+            assert_eq!(
+                entry_render_data,
+                EntryRenderData {
+                    is_dynamic: false,
+                    prefix: "Cargo.toml",
+                    search_hit: "",
+                    suffix: "",
+                    next_char: Some('C'),
+                    kind: &EntryKind::File {
+                        extension: Some("toml".into())
+                    },
+                    shortcut: None,
+                }
+            );
+        }
     }
 }
