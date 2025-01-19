@@ -2,18 +2,22 @@ use std::{
     env, fmt,
     ops::Deref,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 use anyhow::Ok;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{prelude::*, widgets::*, DefaultTerminal};
 use symbols::border;
 
-use crate::entry::{Entry, EntryKind, EntryList, EntryRenderData, EntryShortcutRegistry};
+use crate::{
+    entry::{Entry, EntryKind, EntryList, EntryRenderData, EntryShortcutRegistry},
+    hotkeys::{HotkeysRegistry, KeyCombo},
+};
 
 /// Enum representing whether the system is currently showing a directory listing or paths from the
 /// database.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ListMode {
     /// The system is currently showing a directory listing.
     Directory,
@@ -22,12 +26,42 @@ pub enum ListMode {
     /// and recently.
     #[allow(dead_code)]
     Frecent,
+    // TODO: Implement this mode
+    // /// The system is currently showing the user's bookmarks.
+    // #[allow(dead_code)]
+    // Bookmark,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum InputMode {
     Normal,
     Search,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Action {
+    // Traverse the list
+    SelectNext,
+    SelectPrevious,
+    SelectFirst,
+    SelectLast,
+    ChangeDirectoryToSelectedEntry,
+    ChangeDirectoryToParent,
+
+    // Change the list mode
+    SwitchToListMode(ListMode),
+
+    // Change Input Mode
+    SwitchToInputMode(InputMode),
+
+    // Search Actions
+    ResetSearchInput,
+    ExitSearchInput,
+    ExitSearchMode,
+    SearchInputBackspace,
+
+    ToggleHelp,
+    Exit,
 }
 
 /// The main application struct, will hold the state of the application.
@@ -60,8 +94,19 @@ pub struct App {
     /// The cursor position
     cursor_position: Option<(u16, u16)>,
 
+    // TODO: Remove this registry with the hotkeys registry instead
     /// The shortcuts for the entries
     entry_shortcut_registry: EntryShortcutRegistry,
+
+    /// The buffer of user collected keycodes
+    collected_keycombos: Vec<KeyCombo>,
+
+    /// The last time a key was pressed, this is used to determine when to reset the key sequence
+    last_key_press_time: Option<Instant>,
+
+    /// The hotkeys registry, used to store system and entry hotkeys as well as register new ones
+    /// and assign dynamically shortcuts to entries
+    hotkeys_registry: HotkeysRegistry<InputMode, Action>,
 }
 
 /// The search input struct, used to store the search input value and the current index.
@@ -124,11 +169,17 @@ impl Default for App {
             search_input: SearchInput::default(),
             cursor_position: None,
             entry_shortcut_registry: EntryShortcutRegistry::default(),
+            collected_keycombos: Vec::new(),
+            last_key_press_time: None,
+            hotkeys_registry: HotkeysRegistry::default(),
         }
     }
 }
 
 impl App {
+    /// This timeout is used to determine when a key sequence should be reset due to inactivity.
+    const INACTIVITY_TIMEOUT: Duration = Duration::from_millis(500);
+
     /// Tries to create a new instance of the application - this will read the current directory
     /// and populate the entry list.
     pub fn try_new() -> anyhow::Result<Self> {
@@ -136,6 +187,7 @@ impl App {
         let mut app = App::default();
 
         app.change_directory(path)?;
+        app.hotkeys_registry = HotkeysRegistry::new_with_default_system_hotkeys();
 
         Ok(app)
     }
@@ -159,6 +211,9 @@ impl App {
             }
         });
 
+        // TODO: This could possibly be a config option because it might not be desirable for some
+        // users, if the user selects the first item with the -> key it will change the directory
+        // to the parent directory, which might be a bit confusing
         // Add the parent directory after sorting so that it's always the first item
         if let Some(parent) = path.as_ref().parent() {
             entry_list.items.insert(
@@ -171,6 +226,7 @@ impl App {
             );
         }
 
+        self.list_state = ListState::default();
         self.should_exit = false;
         self.list_mode = ListMode::Directory;
         self.entry_list = entry_list;
@@ -280,7 +336,7 @@ impl App {
             // It's important to check that the event is a key press event as crossterm also emits
             // key release and repeat events on Windows
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)?
+                self.handle_key_event(key_event, key_event.modifiers)?
             }
             // Ignore the rest
             _ => {}
@@ -310,102 +366,42 @@ impl App {
         self.list_state = ListState::default();
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent) -> anyhow::Result<()> {
-        if key.kind != KeyEventKind::Press {
-            return Ok(());
-        }
+    fn handle_key_event_for_search_mode(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifiers,
+    ) -> anyhow::Result<()> {
+        // If the input mode is search, we need to handle the input differently:
+        // First we let the user type in the search input, but we also check if there is a
+        // hotkey registered (e.g., a shortcut to an entry)
+        // 1. If the user types a character:
+        //   - Check if the keycode is a registered hotkey or if the registry returns a trie
+        //   node that has children (means we're on the right path)
+        //      - We add the key code to the collected key combos and reset the last key press time
+        //      - If the trie node has children, we continue to the next key press
+        //      - If the trie node doesn't have children, we reset the collected key combos and
+        //      the last key press time and add the collected key combos to the search input
+        //      instead
+        // 2. If the user presses backspace:
+        //  - We remove the last character from the search input
+        //  - If the search input is empty, we exit search mode
+        //  - We reset the collected key combos and the last key press time (if there are any)
+        // 3. If the user presses escape:
+        //  - We exit search mode, but retain the filtered indices and go to normal mode
+        //  - We reset the collected key combos and the last key press time (if there are any)
+        let key_combo = KeyCombo {
+            key_code: key.code,
+            modifiers,
+        };
+        let maybe_node = self
+            .hotkeys_registry
+            .get_hotkey_node(InputMode::Search, &[key_combo]);
 
-        match self.input_mode {
-            InputMode::Normal => {
-                match key.code {
-                    KeyCode::Char('/') => {
-                        // Enter search mode
-                        self.input_mode = InputMode::Search;
-                        self.search_input.clear();
-                        self.update_filtered_indices();
-                    }
-                    KeyCode::Char('?') => {
-                        self.show_help = !self.show_help;
-                    }
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        if self.show_help {
-                            self.show_help = false;
-                        } else {
-                            self.should_exit = true;
-                        }
-                    }
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        self.show_help = false;
-                        self.list_state.select_next();
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        self.show_help = false;
-                        self.list_state.select_previous();
-                    }
-                    KeyCode::Char('g') | KeyCode::Home => {
-                        self.show_help = false;
-                        self.list_state.select_first();
-                    }
-                    KeyCode::Char('G') | KeyCode::End => {
-                        self.show_help = false;
-                        self.list_state.select_last();
-                    }
-                    KeyCode::Char('f') | KeyCode::Right => {
-                        self.show_help = false;
-                        self.change_list_mode(ListMode::Frecent)?;
-                    }
-                    KeyCode::Char('d') | KeyCode::Left => {
-                        self.show_help = false;
-                        self.change_list_mode(ListMode::Directory)?;
-                    }
-                    KeyCode::Char('_') => {
-                        // clear the search input while in search mode
-                        self.search_input.clear();
-                        self.update_filtered_indices();
-                    }
-                    KeyCode::Char(c) => {
-                        // find the entry with the shortcut (if one exists) and select it
-                        if let Some(entry_index) = self.entry_shortcut_registry.get(&c) {
-                            self.change_directory_to_entry_index(*entry_index)?;
-                        }
-                    }
-                    KeyCode::Enter => {
-                        self.show_help = false;
-                        let entry_index = self.list_state.selected().unwrap_or_default();
-                        self.change_directory_to_entry_index(entry_index)?;
-                    }
-                    // Ignore the rest
-                    _ => {}
-                }
-            }
-
-            // In search mode we need to handle the search input differently, we only care about
-            // the characters and the backspace key
-            InputMode::Search => {
-                match key.code {
-                    KeyCode::Enter => {
-                        // Exit search mode
-                        self.input_mode = InputMode::Normal;
-                    }
-                    KeyCode::Esc => {
-                        // Exit search mode
-                        self.input_mode = InputMode::Normal;
-                        self.search_input.clear();
-                        self.update_filtered_indices();
-                    }
-                    KeyCode::Char(c) => {
-                        // find the entry with the shortcut (if one exists) and select it
-                        if let Some(entry_index) = self.entry_shortcut_registry.get(&c) {
-                            self.change_directory_to_entry_index(*entry_index)?;
-                            self.input_mode = InputMode::Normal;
-                            self.search_input.clear();
-                        } else {
-                            // Add character to the search input
-                            self.search_input.push(c);
-                            self.update_filtered_indices();
-                        }
-                    }
-                    KeyCode::Backspace => {
+        if let Some(node) = maybe_node {
+            if let Some(action) = node.value {
+                // TODO: Execute the action immediately and return
+                match action {
+                    Action::SearchInputBackspace => {
                         // Remove character from the search input
                         if self.search_input.index > 0 {
                             self.search_input.pop();
@@ -413,6 +409,151 @@ impl App {
                         } else {
                             // Exit search mode
                             self.input_mode = InputMode::Normal;
+                        }
+                    }
+                    Action::ExitSearchInput => {
+                        self.input_mode = InputMode::Normal;
+                    }
+                    Action::ExitSearchMode => {
+                        self.input_mode = InputMode::Normal;
+                        self.search_input.clear();
+                        self.update_filtered_indices();
+                    }
+                    _ => {}
+                }
+
+                self.collected_keycombos.clear();
+                self.last_key_press_time = None;
+                return Ok(());
+            }
+
+            if !node.children.is_empty() {
+                // We're on the right path, start collecting the key sequence
+                self.collected_keycombos.push(key_combo);
+                self.last_key_press_time = Some(Instant::now());
+                return Ok(());
+            }
+        } else {
+            // We check for inactivity here so that we can support key sequences
+            if let Some(t) = self.last_key_press_time {
+                if t.elapsed() >= Self::INACTIVITY_TIMEOUT {
+                    // Before clearing the collected key combos, we need to update the search
+                    for key_combo in self.collected_keycombos.iter() {
+                        if let KeyCode::Char(c) = key_combo.key_code {
+                            self.search_input.push(c);
+                        }
+                    }
+                    self.collected_keycombos.clear();
+                    self.last_key_press_time = None;
+                    self.update_filtered_indices();
+                    return Ok(());
+                }
+            }
+            // We're not on the right path, reset the collected key sequence
+            // Update the search input and the filtered indices with the collected keycombos before clearing them
+            self.collected_keycombos.clear();
+            self.last_key_press_time = None;
+
+            if let KeyCode::Char(c) = key.code {
+                self.search_input.push(c);
+                self.update_filtered_indices();
+            }
+
+            return Ok(());
+        }
+
+        Ok(())
+    }
+
+    fn handle_key_event(&mut self, key: KeyEvent, modifiers: KeyModifiers) -> anyhow::Result<()> {
+        if key.kind != KeyEventKind::Press {
+            return Ok(());
+        }
+
+        match self.input_mode {
+            InputMode::Search => {
+                self.handle_key_event_for_search_mode(key, modifiers)?;
+            }
+            InputMode::Normal => {
+                // TODO: This should only happen in normal mode so that we don't choke the trie with checks
+                // We check for inactivity here so that we can support key sequences
+                if let Some(t) = self.last_key_press_time {
+                    if t.elapsed() >= Self::INACTIVITY_TIMEOUT {
+                        self.collected_keycombos.clear();
+                        self.last_key_press_time = None;
+                    }
+                }
+
+                self.last_key_press_time = Some(Instant::now());
+
+                self.collected_keycombos.push(KeyCombo {
+                    key_code: key.code,
+                    modifiers,
+                });
+
+                let maybe_action = self
+                    .hotkeys_registry
+                    .get_hotkey_value(InputMode::Normal, &self.collected_keycombos);
+
+                let Some(&action) = maybe_action else {
+                    return Ok(());
+                };
+
+                self.collected_keycombos.clear();
+                self.last_key_press_time = None;
+
+                match action {
+                    Action::SelectNext => {
+                        self.show_help = false;
+                        self.list_state.select_next();
+                    }
+                    Action::SelectPrevious => {
+                        self.show_help = false;
+                        self.list_state.select_previous();
+                    }
+                    Action::SelectFirst => {
+                        self.show_help = false;
+                        self.list_state.select_first();
+                    }
+                    Action::SelectLast => {
+                        self.show_help = false;
+                        self.list_state.select_last();
+                    }
+                    Action::SwitchToListMode(mode) => {
+                        self.show_help = false;
+                        self.change_list_mode(mode)?;
+                    }
+                    Action::ToggleHelp => {
+                        self.show_help = !self.show_help;
+                    }
+                    Action::SwitchToInputMode(mode) => {
+                        self.show_help = false;
+                        self.input_mode = mode;
+                        self.search_input.clear();
+                        self.update_filtered_indices();
+                    }
+                    Action::ResetSearchInput => {
+                        // clear the search input while in search mode
+                        self.search_input.clear();
+                        self.update_filtered_indices();
+                    }
+                    Action::ChangeDirectoryToSelectedEntry => {
+                        self.show_help = false;
+                        let entry_index = self.list_state.selected().unwrap_or_default();
+                        self.change_directory_to_entry_index(entry_index)?;
+                    }
+                    Action::ChangeDirectoryToParent => {
+                        self.show_help = false;
+
+                        if let Some(parent) = self.current_directory.clone().parent() {
+                            self.change_directory(parent)?;
+                        }
+                    }
+                    Action::Exit => {
+                        if self.show_help {
+                            self.show_help = false;
+                        } else {
+                            self.should_exit = true;
                         }
                     }
                     // Ignore the rest
@@ -565,6 +706,209 @@ impl Widget for &mut App {
     }
 }
 
+impl HotkeysRegistry<InputMode, Action> {
+    pub fn new_with_default_system_hotkeys() -> Self {
+        let mut registry = HotkeysRegistry::new();
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[
+                KeyCombo {
+                    key_code: KeyCode::Char('g'),
+                    modifiers: KeyModifiers::NONE,
+                },
+                KeyCombo {
+                    key_code: KeyCode::Char('g'),
+                    modifiers: KeyModifiers::NONE,
+                },
+            ],
+            Action::SelectFirst,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Home,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::SelectFirst,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('G'),
+                modifiers: KeyModifiers::SHIFT,
+            }],
+            Action::SelectLast,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::End,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::SelectLast,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('j'),
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::SelectNext,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::SelectNext,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('k'),
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::SelectPrevious,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::SelectPrevious,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('d'),
+                modifiers: KeyModifiers::CONTROL,
+            }],
+            Action::SwitchToListMode(ListMode::Directory),
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('l'),
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::ChangeDirectoryToSelectedEntry,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('h'),
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::ChangeDirectoryToParent,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('f'),
+                modifiers: KeyModifiers::CONTROL,
+            }],
+            Action::SwitchToListMode(ListMode::Frecent),
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('?'),
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::ToggleHelp,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('/'),
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::SwitchToInputMode(InputMode::Search),
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Esc,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::Exit,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('q'),
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::Exit,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::ChangeDirectoryToSelectedEntry,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo {
+                key_code: KeyCode::Char('_'),
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::ResetSearchInput,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Search,
+            &[KeyCombo {
+                key_code: KeyCode::Esc,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::ExitSearchMode,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Search,
+            &[KeyCombo {
+                key_code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::ExitSearchInput,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Search,
+            &[KeyCombo {
+                key_code: KeyCode::Backspace,
+                modifiers: KeyModifiers::NONE,
+            }],
+            Action::SearchInputBackspace,
+        );
+
+        registry
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,7 +917,7 @@ mod tests {
     use ratatui::{backend::TestBackend, Terminal};
 
     fn create_test_app() -> App {
-        App {
+        let mut app = App {
             current_directory: PathBuf::from("/home/user"),
             list_mode: ListMode::Directory,
             entry_list: EntryList {
@@ -597,7 +941,9 @@ mod tests {
                 ..Default::default()
             },
             ..Default::default()
-        }
+        };
+        app.hotkeys_registry = HotkeysRegistry::new_with_default_system_hotkeys();
+        app
     }
 
     #[test]
@@ -629,7 +975,8 @@ mod tests {
     #[test]
     fn renders_correctly_with_help_popup_after_key_event() {
         let mut app = create_test_app();
-        app.handle_key_event(KeyCode::Char('?').into()).unwrap();
+        app.handle_key_event(KeyCode::Char('?').into(), KeyModifiers::NONE)
+            .unwrap();
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
@@ -644,7 +991,8 @@ mod tests {
     fn renders_correctly_without_help_popup_after_key_event_toggle() {
         let mut app = create_test_app();
         app.show_help = true;
-        app.handle_key_event(KeyCode::Char('?').into()).unwrap();
+        app.handle_key_event(KeyCode::Char('?').into(), KeyModifiers::NONE)
+            .unwrap();
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
@@ -658,11 +1006,16 @@ mod tests {
     #[test]
     fn renders_correctly_with_search_input_after_key_events() {
         let mut app = create_test_app();
-        app.handle_key_event(KeyCode::Char('/').into()).unwrap();
-        app.handle_key_event(KeyCode::Char('t').into()).unwrap();
-        app.handle_key_event(KeyCode::Char('e').into()).unwrap();
-        app.handle_key_event(KeyCode::Char('s').into()).unwrap();
-        app.handle_key_event(KeyCode::Char('t').into()).unwrap();
+        app.handle_key_event(KeyCode::Char('/').into(), KeyModifiers::NONE)
+            .unwrap();
+        app.handle_key_event(KeyCode::Char('t').into(), KeyModifiers::NONE)
+            .unwrap();
+        app.handle_key_event(KeyCode::Char('e').into(), KeyModifiers::NONE)
+            .unwrap();
+        app.handle_key_event(KeyCode::Char('s').into(), KeyModifiers::NONE)
+            .unwrap();
+        app.handle_key_event(KeyCode::Char('t').into(), KeyModifiers::NONE)
+            .unwrap();
 
         let mut terminal = Terminal::new(TestBackend::new(80, 9)).unwrap();
 
@@ -708,55 +1061,56 @@ mod tests {
         // Make sure we have 3 items
         assert_eq!(app.entry_list.len(), 3);
 
-        let _ = app.handle_key_event(KeyCode::Char('q').into());
+        let _ = app.handle_key_event(KeyCode::Char('q').into(), KeyModifiers::NONE);
         assert!(app.should_exit);
 
-        let _ = app.handle_key_event(KeyCode::Esc.into());
+        let _ = app.handle_key_event(KeyCode::Esc.into(), KeyModifiers::NONE);
         assert!(app.should_exit);
 
-        let _ = app.handle_key_event(KeyCode::Char('j').into());
+        let _ = app.handle_key_event(KeyCode::Char('j').into(), KeyModifiers::NONE);
         assert_eq!(app.list_state.selected(), Some(0));
 
-        let _ = app.handle_key_event(KeyCode::Down.into());
+        let _ = app.handle_key_event(KeyCode::Down.into(), KeyModifiers::NONE);
         assert_eq!(app.list_state.selected(), Some(1));
 
         // press down so that we can go back up more than once
-        let _ = app.handle_key_event(KeyCode::Down.into());
+        let _ = app.handle_key_event(KeyCode::Down.into(), KeyModifiers::NONE);
 
-        let _ = app.handle_key_event(KeyCode::Char('k').into());
+        let _ = app.handle_key_event(KeyCode::Char('k').into(), KeyModifiers::NONE);
         assert_eq!(app.list_state.selected(), Some(1));
 
-        let _ = app.handle_key_event(KeyCode::Up.into());
+        let _ = app.handle_key_event(KeyCode::Up.into(), KeyModifiers::NONE);
         assert_eq!(app.list_state.selected(), Some(0));
 
-        let _ = app.handle_key_event(KeyCode::Char('G').into());
+        let _ = app.handle_key_event(KeyCode::Char('G').into(), KeyModifiers::SHIFT);
         assert_eq!(app.list_state.selected(), Some(usize::MAX));
 
-        let _ = app.handle_key_event(KeyCode::Char('g').into());
+        let _ = app.handle_key_event(KeyCode::Char('g').into(), KeyModifiers::NONE);
+        let _ = app.handle_key_event(KeyCode::Char('g').into(), KeyModifiers::NONE);
         assert_eq!(app.list_state.selected(), Some(0));
 
-        let _ = app.handle_key_event(KeyCode::End.into());
+        let _ = app.handle_key_event(KeyCode::End.into(), KeyModifiers::NONE);
         assert_eq!(app.list_state.selected(), Some(usize::MAX));
 
-        let _ = app.handle_key_event(KeyCode::Home.into());
+        let _ = app.handle_key_event(KeyCode::Home.into(), KeyModifiers::NONE);
         assert_eq!(app.list_state.selected(), Some(0));
 
-        let _ = app.handle_key_event(KeyCode::Char('d').into());
+        let _ = app.handle_key_event(KeyCode::Char('d').into(), KeyModifiers::CONTROL);
         assert_eq!(app.list_mode, ListMode::Directory);
 
-        let _ = app.handle_key_event(KeyCode::Char('f').into());
+        let _ = app.handle_key_event(KeyCode::Char('f').into(), KeyModifiers::CONTROL);
         assert_eq!(app.list_mode, ListMode::Frecent);
 
-        let _ = app.handle_key_event(KeyCode::Char('d').into());
+        let _ = app.handle_key_event(KeyCode::Char('d').into(), KeyModifiers::CONTROL);
         assert_eq!(app.list_mode, ListMode::Directory);
 
-        let _ = app.handle_key_event(KeyCode::Char('?').into());
+        let _ = app.handle_key_event(KeyCode::Char('?').into(), KeyModifiers::NONE);
         assert!(app.show_help);
 
-        let _ = app.handle_key_event(KeyCode::Char('/').into());
+        let _ = app.handle_key_event(KeyCode::Char('/').into(), KeyModifiers::NONE);
         assert_eq!(app.input_mode, InputMode::Search);
 
-        let _ = app.handle_key_event(KeyCode::Esc.into());
+        let _ = app.handle_key_event(KeyCode::Esc.into(), KeyModifiers::NONE);
         assert_eq!(app.input_mode, InputMode::Normal);
     }
 }

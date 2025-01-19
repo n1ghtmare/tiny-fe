@@ -238,13 +238,19 @@ impl TryFrom<ReadDir> for EntryList {
     }
 }
 
+// TODO: Need to switch this from chars to `KeyCode` in order to support more keys (F1, F2, etc.)
+// TODO: Move this to a separate module (shortcuts.rs or hotkeys.rs) and also move the shortcuts
+// handler in app.rs to that module (along with everything that is here)
+// TODO: In future it will be nice if we support key combinations or sequences. So we need to
+// account for that.
+
 /// The preferred shortcuts for the entries in the list. These will be used to quickly jump to an
 /// entry and will be chosed based on the order that they appear in this array, this way we can
 /// prioritize ergonomics. In future versions, we might allow the user to customize these
 /// shortcuts.
-const PREFERRED_SHORTCUTS: [char; 29] = [
+const PREFERRED_SHORTCUTS: [char; 33] = [
     'a', 's', 'w', 'e', 'r', 't', 'z', 'x', 'c', 'v', 'b', 'y', 'u', 'i', 'o', 'p', 'n', 'm', ',',
-    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+    '.', '/', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=',
 ];
 
 #[derive(Debug)]
