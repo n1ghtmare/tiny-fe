@@ -11,8 +11,8 @@ use ratatui::{prelude::*, widgets::*, DefaultTerminal};
 use symbols::border;
 
 use crate::{
-    entry::{Entry, EntryKind, EntryList, EntryRenderData, EntryShortcutRegistry},
-    hotkeys::{HotkeysRegistry, KeyCombo},
+    entry::{Entry, EntryKind, EntryList, EntryRenderData},
+    hotkeys::{HotkeysRegistry, KeyCombo, PREFERRED_KEY_COMBOS_IN_ORDER},
 };
 
 /// Enum representing whether the system is currently showing a directory listing or paths from the
@@ -47,6 +47,7 @@ pub enum Action {
     SelectLast,
     ChangeDirectoryToSelectedEntry,
     ChangeDirectoryToParent,
+    ChangeDirectoryToEntryWithIndex(usize),
 
     // Change the list mode
     SwitchToListMode(ListMode),
@@ -94,12 +95,8 @@ pub struct App {
     /// The cursor position
     cursor_position: Option<(u16, u16)>,
 
-    // TODO: Remove this registry with the hotkeys registry instead
-    /// The shortcuts for the entries
-    entry_shortcut_registry: EntryShortcutRegistry,
-
     /// The buffer of user collected keycodes
-    collected_keycombos: Vec<KeyCombo>,
+    collected_key_combos: Vec<KeyCombo>,
 
     /// The last time a key was pressed, this is used to determine when to reset the key sequence
     last_key_press_time: Option<Instant>,
@@ -168,8 +165,7 @@ impl Default for App {
             input_mode: InputMode::Normal,
             search_input: SearchInput::default(),
             cursor_position: None,
-            entry_shortcut_registry: EntryShortcutRegistry::default(),
-            collected_keycombos: Vec::new(),
+            collected_key_combos: Vec::new(),
             last_key_press_time: None,
             hotkeys_registry: HotkeysRegistry::default(),
         }
@@ -389,18 +385,24 @@ impl App {
         // 3. If the user presses escape:
         //  - We exit search mode, but retain the filtered indices and go to normal mode
         //  - We reset the collected key combos and the last key press time (if there are any)
-        let key_combo = KeyCombo {
-            key_code: key.code,
-            modifiers,
-        };
+
+        // BUG: This logic has a bug, it doesn't work with key sequences longer than 1 character
+
+        let key_combo = KeyCombo::from((key.code, modifiers));
+        self.collected_key_combos.push(key_combo);
+
         let maybe_node = self
             .hotkeys_registry
-            .get_hotkey_node(InputMode::Search, &[key_combo]);
+            .get_hotkey_node(InputMode::Search, &self.collected_key_combos);
 
         if let Some(node) = maybe_node {
             if let Some(action) = node.value {
-                // TODO: Execute the action immediately and return
                 match action {
+                    Action::ChangeDirectoryToEntryWithIndex(index) => {
+                        self.change_directory_to_entry_index(index)?;
+                        self.input_mode = InputMode::Normal;
+                        self.search_input.clear();
+                    }
                     Action::SearchInputBackspace => {
                         // Remove character from the search input
                         if self.search_input.index > 0 {
@@ -422,14 +424,14 @@ impl App {
                     _ => {}
                 }
 
-                self.collected_keycombos.clear();
+                self.collected_key_combos.clear();
                 self.last_key_press_time = None;
                 return Ok(());
             }
 
             if !node.children.is_empty() {
                 // We're on the right path, start collecting the key sequence
-                self.collected_keycombos.push(key_combo);
+                self.collected_key_combos.push(key_combo);
                 self.last_key_press_time = Some(Instant::now());
                 return Ok(());
             }
@@ -438,12 +440,12 @@ impl App {
             if let Some(t) = self.last_key_press_time {
                 if t.elapsed() >= Self::INACTIVITY_TIMEOUT {
                     // Before clearing the collected key combos, we need to update the search
-                    for key_combo in self.collected_keycombos.iter() {
+                    for key_combo in self.collected_key_combos.iter() {
                         if let KeyCode::Char(c) = key_combo.key_code {
                             self.search_input.push(c);
                         }
                     }
-                    self.collected_keycombos.clear();
+                    self.collected_key_combos.clear();
                     self.last_key_press_time = None;
                     self.update_filtered_indices();
                     return Ok(());
@@ -451,7 +453,7 @@ impl App {
             }
             // We're not on the right path, reset the collected key sequence
             // Update the search input and the filtered indices with the collected keycombos before clearing them
-            self.collected_keycombos.clear();
+            self.collected_key_combos.clear();
             self.last_key_press_time = None;
 
             if let KeyCode::Char(c) = key.code {
@@ -460,6 +462,102 @@ impl App {
             }
 
             return Ok(());
+        }
+
+        Ok(())
+    }
+
+    fn handle_key_event_for_input_mode(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifiers,
+    ) -> anyhow::Result<()> {
+        // We check for inactivity here so that we can support key sequences
+        if let Some(t) = self.last_key_press_time {
+            if t.elapsed() >= Self::INACTIVITY_TIMEOUT {
+                self.collected_key_combos.clear();
+                self.last_key_press_time = None;
+            }
+        }
+
+        self.last_key_press_time = Some(Instant::now());
+
+        self.collected_key_combos.push(KeyCombo {
+            key_code: key.code,
+            modifiers,
+        });
+
+        let maybe_action = self
+            .hotkeys_registry
+            .get_hotkey_value(InputMode::Normal, &self.collected_key_combos);
+
+        let Some(&action) = maybe_action else {
+            return Ok(());
+        };
+
+        self.collected_key_combos.clear();
+        self.last_key_press_time = None;
+
+        match action {
+            Action::SelectNext => {
+                self.show_help = false;
+                self.list_state.select_next();
+            }
+            Action::SelectPrevious => {
+                self.show_help = false;
+                self.list_state.select_previous();
+            }
+            Action::SelectFirst => {
+                self.show_help = false;
+                self.list_state.select_first();
+            }
+            Action::SelectLast => {
+                self.show_help = false;
+                self.list_state.select_last();
+            }
+            Action::SwitchToListMode(mode) => {
+                self.show_help = false;
+                self.change_list_mode(mode)?;
+            }
+            Action::ToggleHelp => {
+                self.show_help = !self.show_help;
+            }
+            Action::SwitchToInputMode(mode) => {
+                self.show_help = false;
+                self.input_mode = mode;
+                self.search_input.clear();
+                self.update_filtered_indices();
+            }
+            Action::ResetSearchInput => {
+                // clear the search input while in search mode
+                self.search_input.clear();
+                self.update_filtered_indices();
+            }
+            Action::ChangeDirectoryToSelectedEntry => {
+                self.show_help = false;
+                let entry_index = self.list_state.selected().unwrap_or_default();
+                self.change_directory_to_entry_index(entry_index)?;
+            }
+            Action::ChangeDirectoryToParent => {
+                self.show_help = false;
+
+                if let Some(parent) = self.current_directory.clone().parent() {
+                    self.change_directory(parent)?;
+                }
+            }
+            Action::ChangeDirectoryToEntryWithIndex(index) => {
+                self.show_help = false;
+                self.change_directory_to_entry_index(index)?;
+            }
+            Action::Exit => {
+                if self.show_help {
+                    self.show_help = false;
+                } else {
+                    self.should_exit = true;
+                }
+            }
+            // Ignore the rest
+            _ => {}
         }
 
         Ok(())
@@ -475,90 +573,7 @@ impl App {
                 self.handle_key_event_for_search_mode(key, modifiers)?;
             }
             InputMode::Normal => {
-                // TODO: This should only happen in normal mode so that we don't choke the trie with checks
-                // We check for inactivity here so that we can support key sequences
-                if let Some(t) = self.last_key_press_time {
-                    if t.elapsed() >= Self::INACTIVITY_TIMEOUT {
-                        self.collected_keycombos.clear();
-                        self.last_key_press_time = None;
-                    }
-                }
-
-                self.last_key_press_time = Some(Instant::now());
-
-                self.collected_keycombos.push(KeyCombo {
-                    key_code: key.code,
-                    modifiers,
-                });
-
-                let maybe_action = self
-                    .hotkeys_registry
-                    .get_hotkey_value(InputMode::Normal, &self.collected_keycombos);
-
-                let Some(&action) = maybe_action else {
-                    return Ok(());
-                };
-
-                self.collected_keycombos.clear();
-                self.last_key_press_time = None;
-
-                match action {
-                    Action::SelectNext => {
-                        self.show_help = false;
-                        self.list_state.select_next();
-                    }
-                    Action::SelectPrevious => {
-                        self.show_help = false;
-                        self.list_state.select_previous();
-                    }
-                    Action::SelectFirst => {
-                        self.show_help = false;
-                        self.list_state.select_first();
-                    }
-                    Action::SelectLast => {
-                        self.show_help = false;
-                        self.list_state.select_last();
-                    }
-                    Action::SwitchToListMode(mode) => {
-                        self.show_help = false;
-                        self.change_list_mode(mode)?;
-                    }
-                    Action::ToggleHelp => {
-                        self.show_help = !self.show_help;
-                    }
-                    Action::SwitchToInputMode(mode) => {
-                        self.show_help = false;
-                        self.input_mode = mode;
-                        self.search_input.clear();
-                        self.update_filtered_indices();
-                    }
-                    Action::ResetSearchInput => {
-                        // clear the search input while in search mode
-                        self.search_input.clear();
-                        self.update_filtered_indices();
-                    }
-                    Action::ChangeDirectoryToSelectedEntry => {
-                        self.show_help = false;
-                        let entry_index = self.list_state.selected().unwrap_or_default();
-                        self.change_directory_to_entry_index(entry_index)?;
-                    }
-                    Action::ChangeDirectoryToParent => {
-                        self.show_help = false;
-
-                        if let Some(parent) = self.current_directory.clone().parent() {
-                            self.change_directory(parent)?;
-                        }
-                    }
-                    Action::Exit => {
-                        if self.show_help {
-                            self.show_help = false;
-                        } else {
-                            self.should_exit = true;
-                        }
-                    }
-                    // Ignore the rest
-                    _ => {}
-                }
+                self.handle_key_event_for_input_mode(key, modifiers)?;
             }
         }
 
@@ -641,8 +656,8 @@ impl App {
             .map(|x| EntryRenderData::from_entry(x, &self.search_input))
             .collect();
 
-        self.entry_shortcut_registry
-            .assign_shortcuts(&mut entry_render_data);
+        self.hotkeys_registry
+            .assign_hotkeys(&mut entry_render_data, &PREFERRED_KEY_COMBOS_IN_ORDER);
 
         let items: Vec<ListItem> = entry_render_data.into_iter().map(ListItem::from).collect();
 
@@ -703,209 +718,6 @@ impl Widget for &mut App {
         if self.show_help {
             self.render_help_popup(buf);
         }
-    }
-}
-
-impl HotkeysRegistry<InputMode, Action> {
-    pub fn new_with_default_system_hotkeys() -> Self {
-        let mut registry = HotkeysRegistry::new();
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[
-                KeyCombo {
-                    key_code: KeyCode::Char('g'),
-                    modifiers: KeyModifiers::NONE,
-                },
-                KeyCombo {
-                    key_code: KeyCode::Char('g'),
-                    modifiers: KeyModifiers::NONE,
-                },
-            ],
-            Action::SelectFirst,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Home,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::SelectFirst,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('G'),
-                modifiers: KeyModifiers::SHIFT,
-            }],
-            Action::SelectLast,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::End,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::SelectLast,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('j'),
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::SelectNext,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Down,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::SelectNext,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('k'),
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::SelectPrevious,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Up,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::SelectPrevious,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('d'),
-                modifiers: KeyModifiers::CONTROL,
-            }],
-            Action::SwitchToListMode(ListMode::Directory),
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('l'),
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::ChangeDirectoryToSelectedEntry,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('h'),
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::ChangeDirectoryToParent,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('f'),
-                modifiers: KeyModifiers::CONTROL,
-            }],
-            Action::SwitchToListMode(ListMode::Frecent),
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('?'),
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::ToggleHelp,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('/'),
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::SwitchToInputMode(InputMode::Search),
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Esc,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::Exit,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('q'),
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::Exit,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::ChangeDirectoryToSelectedEntry,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Normal,
-            &[KeyCombo {
-                key_code: KeyCode::Char('_'),
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::ResetSearchInput,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Search,
-            &[KeyCombo {
-                key_code: KeyCode::Esc,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::ExitSearchMode,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Search,
-            &[KeyCombo {
-                key_code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::ExitSearchInput,
-        );
-
-        registry.register_system_hotkey(
-            InputMode::Search,
-            &[KeyCombo {
-                key_code: KeyCode::Backspace,
-                modifiers: KeyModifiers::NONE,
-            }],
-            Action::SearchInputBackspace,
-        );
-
-        registry
     }
 }
 
