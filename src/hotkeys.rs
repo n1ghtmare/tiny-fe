@@ -418,7 +418,6 @@ impl HotkeysRegistry<InputMode, Action> {
         entry_render_data: &mut [EntryRenderData],
         preferred_key_combos_in_order: &[KeyCombo],
     ) {
-        // Reset the entry hotkeys
         self.clear_entry_hotkeys();
 
         let mut directory_indexes: Vec<usize> = Vec::new();

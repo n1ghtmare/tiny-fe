@@ -352,26 +352,28 @@ impl App {
         key: KeyEvent,
         modifiers: KeyModifiers,
     ) -> anyhow::Result<()> {
-        // If the input mode is search, we need to handle the input differently:
-        // First we let the user type in the search input, but we also check if there is a
-        // hotkey registered (e.g., a shortcut to an entry)
-        // 1. If the user types a character:
-        //   - Check if the keycode is a registered hotkey or if the registry returns a trie
-        //   node that has children (means we're on the right path)
-        //      - We add the key code to the collected key combos and reset the last key press time
-        //      - If the trie node has children, we continue to the next key press
-        //      - If the trie node doesn't have children, we reset the collected key combos and
-        //      the last key press time and add the collected key combos to the search input
-        //      instead
-        // 2. If the user presses backspace:
-        //  - We remove the last character from the search input
-        //  - If the search input is empty, we exit search mode
-        //  - We reset the collected key combos and the last key press time (if there are any)
-        // 3. If the user presses escape:
-        //  - We exit search mode, but retain the filtered indices and go to normal mode
-        //  - We reset the collected key combos and the last key press time (if there are any)
+        // We check for inactivity here so that we can support key sequences
+        if let Some(t) = self.last_key_press_time {
+            if t.elapsed() >= Self::INACTIVITY_TIMEOUT {
+                for key_combo in self.collected_key_combos.iter() {
+                    if let KeyCode::Char(c) = key_combo.key_code {
+                        self.search_input.push(c);
+                    }
+                }
 
-        // BUG: This logic has a bug, it doesn't work with key sequences longer than 1 character
+                if let KeyCode::Char(c) = key.code {
+                    self.search_input.push(c);
+                }
+
+                self.update_filtered_indices();
+                self.collected_key_combos.clear();
+                self.last_key_press_time = None;
+
+                return Ok(());
+            }
+        }
+
+        self.last_key_press_time = Some(Instant::now());
 
         let key_combo = KeyCombo::from((key.code, modifiers));
         self.collected_key_combos.push(key_combo);
@@ -382,6 +384,9 @@ impl App {
 
         if let Some(node) = maybe_node {
             if let Some(action) = node.value {
+                self.collected_key_combos.clear();
+                self.last_key_press_time = None;
+
                 match action {
                     Action::ChangeDirectoryToEntryWithIndex(index) => {
                         self.change_directory_to_entry_index(index)?;
@@ -408,46 +413,27 @@ impl App {
                     }
                     _ => {}
                 }
-
-                self.collected_key_combos.clear();
-                self.last_key_press_time = None;
-                return Ok(());
-            }
-
-            if !node.children.is_empty() {
-                // We're on the right path, start collecting the key sequence
-                self.collected_key_combos.push(key_combo);
-                self.last_key_press_time = Some(Instant::now());
-                return Ok(());
-            }
-        } else {
-            // We check for inactivity here so that we can support key sequences
-            if let Some(t) = self.last_key_press_time {
-                if t.elapsed() >= Self::INACTIVITY_TIMEOUT {
-                    // Before clearing the collected key combos, we need to update the search
-                    for key_combo in self.collected_key_combos.iter() {
-                        if let KeyCode::Char(c) = key_combo.key_code {
-                            self.search_input.push(c);
-                        }
-                    }
-                    self.collected_key_combos.clear();
-                    self.last_key_press_time = None;
-                    self.update_filtered_indices();
-                    return Ok(());
-                }
-            }
-            // We're not on the right path, reset the collected key sequence
-            // Update the search input and the filtered indices with the collected keycombos before clearing them
-            self.collected_key_combos.clear();
-            self.last_key_press_time = None;
-
-            if let KeyCode::Char(c) = key.code {
-                self.search_input.push(c);
-                self.update_filtered_indices();
             }
 
             return Ok(());
         }
+
+        // We're at a point where the user has started a sequence, but the sequence didn't
+        // match with anything, in which case we should unroll the sequence into the search
+        // input
+        if self.collected_key_combos.len() > 1 {
+            for key_combo in self.collected_key_combos.iter() {
+                if let KeyCode::Char(c) = key_combo.key_code {
+                    self.search_input.push(c);
+                }
+            }
+        } else if let KeyCode::Char(c) = key.code {
+            self.search_input.push(c);
+        }
+
+        self.update_filtered_indices();
+        self.collected_key_combos.clear();
+        self.last_key_press_time = None;
 
         Ok(())
     }
@@ -467,10 +453,8 @@ impl App {
 
         self.last_key_press_time = Some(Instant::now());
 
-        self.collected_key_combos.push(KeyCombo {
-            key_code: key.code,
-            modifiers,
-        });
+        self.collected_key_combos
+            .push(KeyCombo::from((key.code, modifiers)));
 
         let maybe_action = self
             .hotkeys_registry
@@ -922,5 +906,79 @@ mod tests {
 
         let _ = app.handle_key_event(KeyCode::Esc.into(), KeyModifiers::NONE);
         assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn search_input_backspace() {
+        let mut app = create_test_app();
+        app.input_mode = InputMode::Search;
+        app.search_input.value = "test".into();
+        app.search_input.index = 4;
+
+        let _ = app.handle_key_event(KeyCode::Backspace.into(), KeyModifiers::NONE);
+        assert_eq!(app.search_input.value, "tes".to_string());
+        assert_eq!(app.search_input.index, 3);
+
+        let _ = app.handle_key_event(KeyCode::Backspace.into(), KeyModifiers::NONE);
+        assert_eq!(app.search_input.value, "te".to_string());
+        assert_eq!(app.search_input.index, 2);
+
+        let _ = app.handle_key_event(KeyCode::Backspace.into(), KeyModifiers::NONE);
+        assert_eq!(app.search_input.value, "t".to_string());
+        assert_eq!(app.search_input.index, 1);
+
+        let _ = app.handle_key_event(KeyCode::Backspace.into(), KeyModifiers::NONE);
+        assert_eq!(app.search_input.value, "".to_string());
+        assert_eq!(app.search_input.index, 0);
+
+        let _ = app.handle_key_event(KeyCode::Backspace.into(), KeyModifiers::NONE);
+        assert_eq!(app.search_input.value, "".to_string());
+        assert_eq!(app.search_input.index, 0);
+    }
+
+    #[test]
+    fn search_input_backspace_with_no_input() {
+        let mut app = create_test_app();
+        app.input_mode = InputMode::Search;
+        app.search_input.value = "".into();
+        app.search_input.index = 0;
+
+        let _ = app.handle_key_event(KeyCode::Backspace.into(), KeyModifiers::NONE);
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn search_works_correctly() {
+        let mut app = create_test_app();
+        app.input_mode = InputMode::Search;
+
+        let _ = app.handle_key_event(KeyCode::Char('g').into(), KeyModifiers::NONE);
+        let _ = app.handle_key_event(KeyCode::Char('i').into(), KeyModifiers::NONE);
+        let _ = app.handle_key_event(KeyCode::Char('t').into(), KeyModifiers::NONE);
+
+        assert_eq!(app.search_input.value, "git".to_string());
+        assert_eq!(app.search_input.index, 3);
+
+        app.update_filtered_indices();
+
+        assert_eq!(app.entry_list.filtered_indices, Some(vec![0, 2]));
+    }
+
+    #[test]
+    fn search_renders_correctly() {
+        let mut app = create_test_app();
+        app.input_mode = InputMode::Search;
+
+        let _ = app.handle_key_event(KeyCode::Char('g').into(), KeyModifiers::NONE);
+        let _ = app.handle_key_event(KeyCode::Char('i').into(), KeyModifiers::NONE);
+        let _ = app.handle_key_event(KeyCode::Char('t').into(), KeyModifiers::NONE);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 9)).unwrap();
+
+        terminal
+            .draw(|frame| frame.render_widget(&mut app, frame.area()))
+            .unwrap();
+
+        assert_snapshot!(terminal.backend());
     }
 }

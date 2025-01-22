@@ -1,5 +1,6 @@
 use std::fs::{create_dir, File};
 
+use crossterm::event::{KeyCode, KeyModifiers};
 use insta::assert_snapshot;
 use ratatui::{backend::TestBackend, Terminal};
 
