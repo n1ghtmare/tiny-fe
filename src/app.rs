@@ -11,7 +11,7 @@ use ratatui::{prelude::*, widgets::*, DefaultTerminal};
 use symbols::border;
 
 use crate::{
-    entry::{Entry, EntryKind, EntryList, EntryRenderData},
+    entry::{EntryKind, EntryList, EntryRenderData},
     hotkeys::{HotkeysRegistry, KeyCombo, PREFERRED_KEY_COMBOS_IN_ORDER},
 };
 
@@ -206,21 +206,6 @@ impl App {
                 (EntryKind::File { .. }, EntryKind::Directory) => std::cmp::Ordering::Greater,
             }
         });
-
-        // TODO: This could possibly be a config option because it might not be desirable for some
-        // users, if the user selects the first item with the -> key it will change the directory
-        // to the parent directory, which might be a bit confusing
-        // Add the parent directory after sorting so that it's always the first item
-        if let Some(parent) = path.as_ref().parent() {
-            entry_list.items.insert(
-                0,
-                Entry {
-                    path: parent.to_path_buf(),
-                    kind: EntryKind::Directory,
-                    name: "..".into(),
-                },
-            );
-        }
 
         self.list_state = ListState::default();
         self.should_exit = false;
@@ -656,8 +641,12 @@ impl App {
             .map(|x| EntryRenderData::from_entry(x, &self.search_input))
             .collect();
 
-        self.hotkeys_registry
-            .assign_hotkeys(&mut entry_render_data, &PREFERRED_KEY_COMBOS_IN_ORDER);
+        if self.input_mode == InputMode::Normal
+            || (self.input_mode == InputMode::Search && !self.search_input.is_empty())
+        {
+            self.hotkeys_registry
+                .assign_hotkeys(&mut entry_render_data, &PREFERRED_KEY_COMBOS_IN_ORDER);
+        }
 
         let items: Vec<ListItem> = entry_render_data.into_iter().map(ListItem::from).collect();
 
@@ -723,6 +712,8 @@ impl Widget for &mut App {
 
 #[cfg(test)]
 mod tests {
+    use crate::entry::Entry;
+
     use super::*;
 
     use insta::assert_snapshot;
@@ -735,19 +726,26 @@ mod tests {
             entry_list: EntryList {
                 items: vec![
                     Entry {
-                        path: PathBuf::from("/home/"),
-                        kind: EntryKind::Directory,
-                        name: "..".into(),
-                    },
-                    Entry {
                         path: PathBuf::from("/home/user/.git/"),
                         kind: EntryKind::Directory,
                         name: ".git".into(),
                     },
                     Entry {
+                        path: PathBuf::from("/home/user/dir1/"),
+                        kind: EntryKind::Directory,
+                        name: "dir1".into(),
+                    },
+                    Entry {
                         path: PathBuf::from("/home/user/.gitignore"),
                         kind: EntryKind::File { extension: None },
                         name: ".gitignore".into(),
+                    },
+                    Entry {
+                        path: PathBuf::from("/home/user/Cargo.toml"),
+                        kind: EntryKind::File {
+                            extension: Some("toml".into()),
+                        },
+                        name: "Cargo.toml".into(),
                     },
                 ],
                 ..Default::default()
@@ -870,8 +868,8 @@ mod tests {
     fn handle_key_event() {
         let mut app = create_test_app();
 
-        // Make sure we have 3 items
-        assert_eq!(app.entry_list.len(), 3);
+        // Make sure we have 4 items
+        assert_eq!(app.entry_list.len(), 4);
 
         let _ = app.handle_key_event(KeyCode::Char('q').into(), KeyModifiers::NONE);
         assert!(app.should_exit);

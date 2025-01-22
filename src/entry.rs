@@ -68,13 +68,18 @@ impl TryFrom<DirEntry> for Entry {
 /// The shortcut is assigned at a later stage and is used to quickly jump to the entry.
 #[derive(Debug, PartialEq)]
 pub struct EntryRenderData<'a> {
-    /// A boolean indicating if the entry is dynamic (e.g., "..", which is not a "real" entry)
-    pub is_dynamic: bool,
     prefix: &'a str,
     search_hit: &'a str,
     suffix: &'a str,
-    /// The next character immediately after the search hit
-    pub next_char: Option<char>,
+
+    /// The character that shouldn't appear in a hotkey sequence for the entry. That's normally the
+    /// first character of the name, first character after the search hit or the first character
+    /// after the dot in the name (if the name starts with a dot).
+    ///
+    /// NOTE: that the character is converted to lowercase before being stored, since our search is
+    /// case insensitive.
+    pub illegal_char_for_hotkey: Option<char>,
+
     /// The kind of the entry, we need to keep track of this because we render directories
     /// differently than files
     pub kind: &'a EntryKind,
@@ -84,25 +89,19 @@ pub struct EntryRenderData<'a> {
 
 impl EntryRenderData<'_> {
     pub fn from_entry<T: AsRef<str>>(entry: &Entry, search_query: T) -> EntryRenderData {
-        if entry.name == ".." {
-            return EntryRenderData {
-                is_dynamic: true,
-                prefix: &entry.name,
-                search_hit: "",
-                suffix: "",
-                next_char: None,
-                kind: &EntryKind::Directory,
-                key_combo_sequence: None,
-            };
+        // Since our "search"/"filter" is case insensitive, and our for entries are always in lower
+        // case, we need to make sure that the character we use for `illegal_char_for_hotkey` is
+        // lowercase as well
+        fn get_next_char_lowercase(name: &str) -> Option<char> {
+            name.chars().next().and_then(|c| c.to_lowercase().next())
         }
 
         if search_query.as_ref().is_empty() {
             return EntryRenderData {
-                is_dynamic: false,
                 prefix: &entry.name,
                 search_hit: "",
                 suffix: "",
-                next_char: entry.name.chars().next(),
+                illegal_char_for_hotkey: get_next_char_lowercase(&entry.name),
                 kind: &entry.kind,
                 key_combo_sequence: None,
             };
@@ -116,24 +115,21 @@ impl EntryRenderData<'_> {
             let prefix = &entry.name[..index];
             let search_hit = &entry.name[index..(index + search_query.len())];
             let suffix = &entry.name[(index + search_query.len())..];
-            let next_char = suffix.chars().next();
 
             EntryRenderData {
-                is_dynamic: false,
                 prefix,
                 search_hit,
                 suffix,
-                next_char,
+                illegal_char_for_hotkey: get_next_char_lowercase(suffix),
                 kind: &entry.kind,
                 key_combo_sequence: None,
             }
         } else {
             EntryRenderData {
-                is_dynamic: false,
                 prefix: &entry.name,
                 search_hit: "",
                 suffix: "",
-                next_char: entry.name.chars().next(),
+                illegal_char_for_hotkey: get_next_char_lowercase(&entry.name),
                 kind: &entry.kind,
                 key_combo_sequence: None,
             }
@@ -262,11 +258,10 @@ mod tests {
             assert_eq!(
                 entry_render_data,
                 EntryRenderData {
-                    is_dynamic: false,
                     prefix: "",
                     search_hit: "Car",
                     suffix: "go.toml",
-                    next_char: Some('g'),
+                    illegal_char_for_hotkey: Some('g'),
                     kind: &EntryKind::File {
                         extension: Some("toml".into())
                     },
@@ -279,11 +274,10 @@ mod tests {
             assert_eq!(
                 entry_render_data,
                 EntryRenderData {
-                    is_dynamic: false,
                     prefix: "Cargo.",
                     search_hit: "toml",
                     suffix: "",
-                    next_char: None,
+                    illegal_char_for_hotkey: None,
                     kind: &EntryKind::File {
                         extension: Some("toml".into())
                     },
@@ -296,11 +290,10 @@ mod tests {
             assert_eq!(
                 entry_render_data,
                 EntryRenderData {
-                    is_dynamic: false,
                     prefix: "C",
                     search_hit: "argo",
                     suffix: ".toml",
-                    next_char: Some('.'),
+                    illegal_char_for_hotkey: Some('.'),
                     kind: &EntryKind::File {
                         extension: Some("toml".into())
                     },
@@ -313,11 +306,10 @@ mod tests {
             assert_eq!(
                 entry_render_data,
                 EntryRenderData {
-                    is_dynamic: false,
                     prefix: "Cargo.toml",
                     search_hit: "",
                     suffix: "",
-                    next_char: Some('C'),
+                    illegal_char_for_hotkey: Some('c'),
                     kind: &EntryKind::File {
                         extension: Some("toml".into())
                     },

@@ -158,15 +158,12 @@ where
 
     pub fn register_system_hotkey(&mut self, context: C, key_combos: &[KeyCombo], value: T) {
         self.system_hotkeys_count += 1;
-
         let trie = self.system_hotkeys.entry(context).or_default();
-
         trie.insert(key_combos, value);
     }
 
     pub fn register_entry_hotkey(&mut self, key_combos: &[KeyCombo], value: T) {
         self.entry_hotkeys_count += 1;
-
         self.entry_hotkeys.insert(key_combos, value);
     }
 
@@ -176,11 +173,11 @@ where
     }
 
     pub fn get_hotkey_value(&self, context: C, key_combos: &[KeyCombo]) -> Option<&T> {
-        // System hotkeys take priority
         if self.system_hotkeys_count == 0 && self.entry_hotkeys_count == 0 {
             return None;
         }
 
+        // System hotkeys take priority
         self.system_hotkeys
             .get(&context)
             .and_then(|trie| trie.get_value(key_combos))
@@ -192,11 +189,11 @@ where
         context: C,
         key_combos: &[KeyCombo],
     ) -> Option<&HotkeysTrieNode<T>> {
-        // System hotkeys take priority
         if self.system_hotkeys_count == 0 && self.entry_hotkeys_count == 0 {
             return None;
         }
 
+        // System hotkeys take priority
         self.system_hotkeys
             .get(&context)
             .and_then(|trie| trie.get_node(key_combos))
@@ -225,7 +222,7 @@ const fn key_combo_from_char(c: char) -> KeyCombo {
 /// entry and will be chosed based on the order that they appear in this array, this way we can
 /// prioritize ergonomics. In future versions, we might allow the user to customize these
 /// shortcuts.
-pub const PREFERRED_KEY_COMBOS_IN_ORDER: [KeyCombo; 33] = [
+pub const PREFERRED_KEY_COMBOS_IN_ORDER: [KeyCombo; 31] = [
     key_combo_from_char('a'),
     key_combo_from_char('s'),
     key_combo_from_char('w'),
@@ -245,8 +242,6 @@ pub const PREFERRED_KEY_COMBOS_IN_ORDER: [KeyCombo; 33] = [
     key_combo_from_char('n'),
     key_combo_from_char('m'),
     key_combo_from_char(','),
-    key_combo_from_char('.'),
-    key_combo_from_char('/'),
     key_combo_from_char('1'),
     key_combo_from_char('2'),
     key_combo_from_char('3'),
@@ -429,7 +424,7 @@ impl HotkeysRegistry<InputMode, Action> {
         let mut directory_indexes: Vec<usize> = Vec::new();
 
         for (i, entry_render_datum) in entry_render_data.iter().enumerate() {
-            if *entry_render_datum.kind == EntryKind::Directory && !entry_render_datum.is_dynamic {
+            if *entry_render_datum.kind == EntryKind::Directory {
                 directory_indexes.push(i);
             }
         }
@@ -445,7 +440,7 @@ impl HotkeysRegistry<InputMode, Action> {
         // the user can continue typing if in search mode)
         let illegal_key_codes = entry_render_data
             .iter()
-            .filter_map(|x| x.next_char)
+            .filter_map(|x| x.illegal_char_for_hotkey)
             .map(KeyCode::Char)
             .collect::<HashSet<_>>();
 
@@ -722,6 +717,7 @@ mod tests {
                 KeyCombo::from('b'),
                 KeyCombo::from('a'),
                 KeyCombo::from('c'),
+                KeyCombo::from('y'),
             ],
         );
 
@@ -739,7 +735,7 @@ mod tests {
 
         assert_eq!(
             entry_render_data[2].key_combo_sequence,
-            Some(vec![KeyCombo::from('b'), KeyCombo::from('c')])
+            Some(vec![KeyCombo::from('b'), KeyCombo::from('y')])
         );
 
         assert_eq!(
