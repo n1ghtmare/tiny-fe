@@ -662,6 +662,8 @@ impl App {
         {
             self.hotkeys_registry
                 .assign_hotkeys(&mut entry_render_data, &PREFERRED_KEY_COMBOS_IN_ORDER);
+        } else {
+            self.hotkeys_registry.clear_entry_hotkeys();
         }
 
         let items: Vec<ListItem> = entry_render_data.into_iter().map(ListItem::from).collect();
