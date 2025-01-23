@@ -166,7 +166,7 @@ impl Default for App {
             cursor_position: None,
             collected_key_combos: Vec::new(),
             last_key_press_time: None,
-            hotkeys_registry: HotkeysRegistry::default(),
+            hotkeys_registry: HotkeysRegistry::new_with_default_system_hotkeys(),
         }
     }
 }
@@ -182,7 +182,6 @@ impl App {
         let mut app = App::default();
 
         app.change_directory(path)?;
-        app.hotkeys_registry = HotkeysRegistry::new_with_default_system_hotkeys();
 
         Ok(app)
     }
@@ -539,7 +538,11 @@ impl App {
         Ok(())
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent, modifiers: KeyModifiers) -> anyhow::Result<()> {
+    pub fn handle_key_event(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifiers,
+    ) -> anyhow::Result<()> {
         if key.kind != KeyEventKind::Press {
             return Ok(());
         }
@@ -730,7 +733,7 @@ mod tests {
     use ratatui::{backend::TestBackend, Terminal};
 
     fn create_test_app() -> App {
-        let mut app = App {
+        App {
             current_directory: PathBuf::from("/home/user"),
             list_mode: ListMode::Directory,
             entry_list: EntryList {
@@ -761,9 +764,7 @@ mod tests {
                 ..Default::default()
             },
             ..Default::default()
-        };
-        app.hotkeys_registry = HotkeysRegistry::new_with_default_system_hotkeys();
-        app
+        }
     }
 
     #[test]
