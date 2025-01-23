@@ -3,12 +3,12 @@ source: src/app.rs
 expression: terminal.backend()
 snapshot_kind: text
 ---
-"                                     Tiny FE                                    "
+"                                 Tiny FE v0.1.0                                 "
 "|> /home/user                                                                   "
 "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
 "┃>.git/  a                                                                     ┃"
 "┃ .gitignore                                                                   ┃"
 "┃                                                                              ┃"
+"┃                                                                              ┃"
 "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
-" (d)irectory │ (f)recent                                                        "
 " /git                                                                           "

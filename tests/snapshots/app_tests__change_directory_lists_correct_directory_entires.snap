@@ -3,13 +3,13 @@ source: tests/app_tests.rs
 expression: terminal.backend()
 snapshot_kind: text
 ---
-"                                     Tiny FE                                    "
+"                                 Tiny FE v0.1.0                                 "
 "|> /tmp/tiny_fe                                                                 "
 "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
 "┃>sub_dir/  a                                                                  ┃"
 "┃ file_1.txt                                                                   ┃"
 "┃ file_2.txt                                                                   ┃"
 "┃                                                                              ┃"
+"┃                                                                              ┃"
 "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
-" (d)irectory │ (f)recent                                                        "
-"                                Press ? for help                                "
+"Ctrl + (d)irectory │ (f)recent                                  Press ? for help"

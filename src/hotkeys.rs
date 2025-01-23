@@ -328,6 +328,12 @@ impl HotkeysRegistry<InputMode, Action> {
 
         registry.register_system_hotkey(
             InputMode::Normal,
+            &[KeyCombo::from(KeyCode::Backspace)],
+            Action::ChangeDirectoryToParent,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
             &[KeyCombo::from(('f', KeyModifiers::CONTROL))],
             Action::SwitchToListMode(ListMode::Frecent),
         );
@@ -366,13 +372,13 @@ impl HotkeysRegistry<InputMode, Action> {
 
         registry.register_system_hotkey(
             InputMode::Search,
-            &[KeyCombo::from(KeyCode::Esc)],
-            Action::ExitSearchMode,
+            &[KeyCombo::from(KeyCode::Enter)],
+            Action::ChangeDirectoryToSelectedEntry,
         );
 
         registry.register_system_hotkey(
             InputMode::Search,
-            &[KeyCombo::from(KeyCode::Enter)],
+            &[KeyCombo::from(KeyCode::Esc)],
             Action::ExitSearchInput,
         );
 

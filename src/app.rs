@@ -58,7 +58,6 @@ pub enum Action {
     // Search Actions
     ResetSearchInput,
     ExitSearchInput,
-    ExitSearchMode,
     SearchInputBackspace,
 
     ToggleHelp,
@@ -406,10 +405,15 @@ impl App {
                     Action::ExitSearchInput => {
                         self.input_mode = InputMode::Normal;
                     }
-                    Action::ExitSearchMode => {
-                        self.input_mode = InputMode::Normal;
-                        self.search_input.clear();
-                        self.update_filtered_indices();
+                    Action::ChangeDirectoryToSelectedEntry => {
+                        if let Some(filtered_indices) = &self.entry_list.filtered_indices {
+                            if !filtered_indices.is_empty() {
+                                self.input_mode = InputMode::Normal;
+                                self.search_input.clear();
+                                let entry_index = self.list_state.selected().unwrap_or_default();
+                                self.change_directory_to_entry_index(entry_index)?;
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -521,8 +525,11 @@ impl App {
             Action::Exit => {
                 if self.show_help {
                     self.show_help = false;
-                } else {
+                } else if self.search_input.is_empty() {
                     self.should_exit = true;
+                } else {
+                    self.search_input.clear();
+                    self.update_filtered_indices();
                 }
             }
             // Ignore the rest
@@ -557,10 +564,14 @@ impl App {
     }
 
     fn render_header(area: Rect, buf: &mut Buffer) {
-        Paragraph::new("Tiny FE")
-            .bold()
-            .centered()
-            .render(area, buf);
+        let app_version = env!("CARGO_PKG_VERSION");
+
+        let line = Line::from(vec![
+            Span::styled("Tiny FE", Style::default().bold()),
+            Span::styled(format!(" v{}", app_version), Style::default().dark_gray()),
+        ]);
+
+        Paragraph::new(line).centered().render(area, buf);
     }
 
     fn render_selected_tab_title(&mut self, area: Rect, buf: &mut Buffer) {
@@ -571,18 +582,6 @@ impl App {
         ]);
 
         Paragraph::new(Text::from(vec![line])).render(area, buf);
-    }
-
-    fn render_tabs(&mut self, area: Rect, buf: &mut Buffer) {
-        let select_index = match self.list_mode {
-            ListMode::Directory => 0,
-            ListMode::Frecent => 1,
-        };
-
-        Tabs::new(["(d)irectory", "(f)recent"])
-            .highlight_style(Style::new().fg(Color::Green))
-            .select(select_index)
-            .render(area, buf);
     }
 
     fn render_footer(&mut self, area: Rect, buf: &mut Buffer) {
@@ -601,9 +600,39 @@ impl App {
             self.cursor_position = Some((cursor_x, cursor_y));
         } else {
             if self.search_input.is_empty() {
-                Paragraph::new("Press ? for help")
-                    .centered()
-                    .render(area, buf);
+                let select_index = match self.list_mode {
+                    ListMode::Directory => 0,
+                    ListMode::Frecent => 1,
+                };
+
+                let block = Block::default().borders(Borders::NONE);
+                block.render(area, buf);
+
+                let chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints(
+                        [
+                            Constraint::Length(6),
+                            Constraint::Min(1),
+                            Constraint::Length(16),
+                        ]
+                        .as_ref(),
+                    )
+                    .split(area);
+
+                Text::from(Span::styled(
+                    "Ctrl + ",
+                    Style::default().fg(Color::DarkGray),
+                ))
+                .alignment(Alignment::Left)
+                .render(chunks[0], buf);
+
+                Tabs::new(["(d)irectory", "(f)recent"])
+                    .highlight_style(Style::default().fg(Color::Green))
+                    .select(select_index)
+                    .render(chunks[1], buf);
+
+                Paragraph::new("Press ? for help ").render(chunks[2], buf);
             } else {
                 Paragraph::new(input).left_aligned().render(area, buf);
             }
@@ -669,15 +698,13 @@ impl Widget for &mut App {
     where
         Self: Sized,
     {
-        let [header_area, selected_tab_title_area, main_area, tabs_area, footer_area] =
-            Layout::vertical([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Fill(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-            ])
-            .areas(area);
+        let [header_area, selected_tab_title_area, main_area, footer_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
 
         let [list_area] = Layout::vertical([Constraint::Fill(1)]).areas(main_area);
 
@@ -685,7 +712,6 @@ impl Widget for &mut App {
 
         self.render_footer(footer_area, buf);
         self.render_selected_tab_title(selected_tab_title_area, buf);
-        self.render_tabs(tabs_area, buf);
         self.render_list(list_area, buf);
 
         if self.show_help {
