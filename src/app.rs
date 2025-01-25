@@ -356,6 +356,23 @@ impl App {
         self.list_state = ListState::default();
     }
 
+    /// Handles a key event with the given key and modifiers, it will perform the appropriate
+    /// action based on the current input mode and registered hotkeys.
+    pub fn handle_key_event(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifiers,
+    ) -> anyhow::Result<()> {
+        if key.kind != KeyEventKind::Press {
+            return Ok(());
+        }
+
+        match self.input_mode {
+            InputMode::Search => self.handle_key_event_for_search_mode(key, modifiers),
+            InputMode::Normal => self.handle_key_event_for_normal_mode(key, modifiers),
+        }
+    }
+
     fn handle_key_event_for_search_mode(
         &mut self,
         key: KeyEvent,
@@ -452,7 +469,7 @@ impl App {
         Ok(())
     }
 
-    fn handle_key_event_for_input_mode(
+    fn handle_key_event_for_normal_mode(
         &mut self,
         key: KeyEvent,
         modifiers: KeyModifiers,
@@ -544,27 +561,6 @@ impl App {
             }
             // Ignore the rest
             _ => {}
-        }
-
-        Ok(())
-    }
-
-    pub fn handle_key_event(
-        &mut self,
-        key: KeyEvent,
-        modifiers: KeyModifiers,
-    ) -> anyhow::Result<()> {
-        if key.kind != KeyEventKind::Press {
-            return Ok(());
-        }
-
-        match self.input_mode {
-            InputMode::Search => {
-                self.handle_key_event_for_search_mode(key, modifiers)?;
-            }
-            InputMode::Normal => {
-                self.handle_key_event_for_input_mode(key, modifiers)?;
-            }
         }
 
         Ok(())
