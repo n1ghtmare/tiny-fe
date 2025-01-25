@@ -322,7 +322,19 @@ impl HotkeysRegistry<InputMode, Action> {
 
         registry.register_system_hotkey(
             InputMode::Normal,
+            &[KeyCombo::from(KeyCode::Right)],
+            Action::ChangeDirectoryToSelectedEntry,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
             &[KeyCombo::from('h')],
+            Action::ChangeDirectoryToParent,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Normal,
+            &[KeyCombo::from(KeyCode::Left)],
             Action::ChangeDirectoryToParent,
         );
 
@@ -374,6 +386,24 @@ impl HotkeysRegistry<InputMode, Action> {
             InputMode::Search,
             &[KeyCombo::from(KeyCode::Enter)],
             Action::ChangeDirectoryToSelectedEntry,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Search,
+            &[KeyCombo::from(KeyCode::Right)],
+            Action::ChangeDirectoryToSelectedEntry,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Search,
+            &[KeyCombo::from(KeyCode::Down)],
+            Action::SelectNext,
+        );
+
+        registry.register_system_hotkey(
+            InputMode::Search,
+            &[KeyCombo::from(KeyCode::Up)],
+            Action::SelectPrevious,
         );
 
         registry.register_system_hotkey(

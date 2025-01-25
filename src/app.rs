@@ -287,16 +287,20 @@ impl App {
                 Span::raw(" - Move down/up"),
             ]),
             Line::from(vec![
-                Span::styled("> g/G or Home/End", Style::default().fg(Color::Yellow)),
+                Span::styled("> gg/G or Home/End", Style::default().fg(Color::Yellow)),
                 Span::raw(" - Go to top/bottom"),
             ]),
             Line::from(vec![
-                Span::styled("> d/r", Style::default().fg(Color::Yellow)),
+                Span::styled("> Ctrl + d/r", Style::default().fg(Color::Yellow)),
                 Span::raw(" - Switch category (d)irectory or (f)recent"),
             ]),
             Line::from(vec![
-                Span::styled("> Enter", Style::default().fg(Color::Yellow)),
-                Span::raw(" - Select item"),
+                Span::styled("> Enter, l or →", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Go into directory"),
+            ]),
+            Line::from(vec![
+                Span::styled("> h or ←", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Go up a directory"),
             ]),
             Line::from(vec![
                 Span::styled("> ?", Style::default().fg(Color::Yellow)),
@@ -309,6 +313,10 @@ impl App {
             Line::from(vec![
                 Span::styled("> /", Style::default().fg(Color::Yellow)),
                 Span::raw(" - Search"),
+            ]),
+            Line::from(vec![
+                Span::styled("> _", Style::default().fg(Color::Yellow)),
+                Span::raw(" - Reset search"),
             ]),
         ]))
         .reset()
@@ -428,6 +436,12 @@ impl App {
                             // Exit search mode
                             self.input_mode = InputMode::Normal;
                         }
+                    }
+                    Action::SelectNext => {
+                        self.list_state.select_next();
+                    }
+                    Action::SelectPrevious => {
+                        self.list_state.select_previous();
                     }
                     Action::ExitSearchInput => {
                         self.input_mode = InputMode::Normal;
