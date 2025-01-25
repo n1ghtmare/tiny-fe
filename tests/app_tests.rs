@@ -1,11 +1,8 @@
-use std::{
-    fs::{create_dir, File},
-    io,
-};
+use std::fs::{create_dir, File};
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use insta::assert_snapshot;
-use ratatui::{backend::TestBackend, prelude::CrosstermBackend, Terminal};
+use ratatui::{backend::TestBackend, Terminal};
 
 use tiny_fe::app::App;
 
@@ -203,7 +200,7 @@ fn app_returns_expected_path_after_exit() {
     let mut app = App::default();
     app.change_directory(&temp_dir).unwrap();
 
-    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout())).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
 
     // Move into the subdirectory
     app.handle_key_event(KeyCode::Enter.into(), KeyModifiers::NONE)

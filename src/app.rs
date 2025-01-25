@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::Ok;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::{prelude::*, widgets::*, DefaultTerminal};
+use ratatui::{prelude::*, widgets::*};
 use symbols::border;
 
 use crate::{
@@ -244,7 +244,7 @@ impl App {
     }
 
     /// Runs the application's main loop until the user quits.
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<PathBuf> {
+    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> anyhow::Result<PathBuf> {
         while !self.should_exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
