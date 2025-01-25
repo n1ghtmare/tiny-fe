@@ -1,8 +1,11 @@
-use std::fs::{create_dir, File};
+use std::{
+    fs::{create_dir, File},
+    io,
+};
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use insta::assert_snapshot;
-use ratatui::{backend::TestBackend, Terminal};
+use ratatui::{backend::TestBackend, prelude::CrosstermBackend, Terminal};
 
 use tiny_fe::app::App;
 
@@ -177,4 +180,41 @@ fn entry_hotkey_jumps_successfully_in_search_mode() {
         .unwrap();
 
     assert_snapshot!(terminal.backend());
+}
+
+#[test]
+fn app_returns_expected_path_after_exit() {
+    // Create a temporary directory with a static name so that test snapshots are consistent
+    let temp_dir = tempfile::Builder::new().tempdir().unwrap();
+
+    let temp_path = temp_dir.path();
+
+    // Create some temp files in the firectory
+    let file_1 = temp_path.join("file_1.txt");
+    File::create(&file_1).unwrap();
+
+    let file_2 = temp_path.join("file_2.txt");
+    File::create(&file_2).unwrap();
+
+    // Create a temporary subdirectory
+    let sub_dir = temp_path.join("sub_dir");
+    create_dir(&sub_dir).unwrap();
+
+    let mut app = App::default();
+    app.change_directory(&temp_dir).unwrap();
+
+    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout())).unwrap();
+
+    // Move into the subdirectory
+    app.handle_key_event(KeyCode::Enter.into(), KeyModifiers::NONE)
+        .unwrap();
+
+    // Exit the app
+    app.handle_key_event(KeyCode::Esc.into(), KeyModifiers::NONE)
+        .unwrap();
+
+    let result = app.run(&mut terminal).unwrap();
+
+    // The app should return the path of the subdirectory since that's where we exited
+    assert_eq!(result, sub_dir);
 }

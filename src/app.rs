@@ -233,13 +233,13 @@ impl App {
     }
 
     /// Runs the application's main loop until the user quits.
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
+    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<PathBuf> {
         while !self.should_exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
         }
 
-        Ok(())
+        Ok(self.current_directory.clone())
     }
 
     fn draw(&mut self, frame: &mut Frame) {
