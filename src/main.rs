@@ -1,11 +1,11 @@
-use tiny_fe::app::App;
+use tiny_fe::app::{App, ListMode};
 
 fn main() -> anyhow::Result<()> {
     let mut terminal = ratatui::init();
     // Clear the terminal and store its current state
     terminal.clear()?;
 
-    let mut app = App::try_new()?;
+    let mut app = App::try_new(ListMode::default())?;
     let app_result = app.run(&mut terminal)?;
 
     // Restore the state of the terminal before the app was opened

@@ -17,9 +17,10 @@ use crate::{
 
 /// Enum representing whether the system is currently showing a directory listing or paths from the
 /// database.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ListMode {
     /// The system is currently showing a directory listing.
+    #[default]
     Directory,
     // TODO: Implement this mode
     /// The system is currently showing paths from the database that have been accessed frequently
@@ -175,15 +176,25 @@ impl App {
     /// This timeout is used to determine when a key sequence should be reset due to inactivity.
     const INACTIVITY_TIMEOUT: Duration = Duration::from_millis(500);
 
-    /// Tries to create a new instance of the application - this will read the current directory
-    /// and populate the entry list.
-    pub fn try_new() -> anyhow::Result<Self> {
+    /// Tries to create a new instance of the application in a given list mode.
+    pub fn try_new(mode: ListMode) -> anyhow::Result<Self> {
         let path = env::current_dir()?;
-        let mut app = App::default();
 
-        app.change_directory(path)?;
-
-        Ok(app)
+        match mode {
+            ListMode::Directory => {
+                let mut app = App::default();
+                app.change_directory(path)?;
+                Ok(app)
+            }
+            ListMode::Frecent => {
+                let mut app = App {
+                    list_mode: ListMode::Frecent,
+                    ..Default::default()
+                };
+                app.change_list_mode(ListMode::Frecent)?;
+                Ok(app)
+            }
+        }
     }
 
     /// Changes the current directory and sorts the entries in the new directory.
