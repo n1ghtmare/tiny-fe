@@ -73,17 +73,17 @@ pub struct EntryRenderData<'a> {
     suffix: &'a str,
 
     /// The character that shouldn't appear in a hotkey sequence for the entry. That's normally the
-    /// first character of the name, first character after the search hit or the first character
-    /// after the dot in the name (if the name starts with a dot).
+    /// first character of the name or first character after the search hit. The idea is to allow
+    /// the user to be able finish writing out the entry name without jumping to the entry itself.
     ///
     /// NOTE: that the character is converted to lowercase before being stored, since our search is
     /// case insensitive.
     pub illegal_char_for_hotkey: Option<char>,
 
     /// The kind of the entry, we need to keep track of this because we render directories
-    /// differently than files
+    /// differently than files.
     pub kind: &'a EntryKind,
-    /// The key combo sequence assigned to the entry, it's an optional sequence of key combos
+    /// The key combo sequence assigned to the entry, it's an optional sequence of key combos.
     pub key_combo_sequence: Option<Vec<KeyCombo>>,
 }
 
