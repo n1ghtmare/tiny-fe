@@ -160,4 +160,14 @@ impl DirectoryIndex {
 
         matches.first().map(|(path, _, _)| path.clone())
     }
+
+    pub fn get_all_entries_ordered_by_rank(&self) -> Vec<PathBuf> {
+        let mut entries: Vec<_> = self.data.iter().collect();
+        entries.sort_by(|a, b| {
+            b.1.frecent_score()
+                .partial_cmp(&a.1.frecent_score())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        entries.into_iter().map(|(path, _)| path.clone()).collect()
+    }
 }

@@ -24,9 +24,16 @@ impl TryFrom<DirEntry> for Entry {
     type Error = anyhow::Error;
 
     fn try_from(value: DirEntry) -> Result<Self, Self::Error> {
-        let file_type = value.file_type()?;
-        let path = value.path();
-        let name = path
+        Entry::try_from(value.path())
+    }
+}
+
+impl TryFrom<PathBuf> for Entry {
+    type Error = anyhow::Error;
+
+    fn try_from(value: PathBuf) -> Result<Self, Self::Error> {
+        let file_type = value.metadata()?.file_type();
+        let name = value
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
@@ -34,15 +41,15 @@ impl TryFrom<DirEntry> for Entry {
 
         let item = if file_type.is_dir() {
             Entry {
-                path,
+                path: value,
                 kind: EntryKind::Directory,
                 name,
             }
         } else {
-            let extension = path.extension().map(|x| x.to_string_lossy().into_owned());
+            let extension = value.extension().map(|x| x.to_string_lossy().into_owned());
 
             Entry {
-                path,
+                path: value,
                 kind: EntryKind::File { extension },
                 name,
             }
@@ -226,6 +233,24 @@ impl TryFrom<ReadDir> for EntryList {
         for dir_entry_result in value.into_iter() {
             let dir_entry = dir_entry_result?;
             let item = Entry::try_from(dir_entry)?;
+            items.push(item);
+        }
+
+        Ok(EntryList {
+            items,
+            ..Default::default()
+        })
+    }
+}
+
+impl TryFrom<Vec<PathBuf>> for EntryList {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Vec<PathBuf>) -> Result<Self, Self::Error> {
+        let mut items = Vec::new();
+
+        for path in value {
+            let item = Entry::try_from(path)?;
             items.push(item);
         }
 

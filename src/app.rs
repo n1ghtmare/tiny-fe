@@ -13,6 +13,7 @@ use symbols::border;
 use crate::{
     entry::{EntryKind, EntryList, EntryRenderData},
     hotkeys::{HotkeysRegistry, KeyCombo, PREFERRED_KEY_COMBOS_IN_ORDER},
+    index::{DirectoryIndex, DEFAULT_INDEX_FILE_NAME},
 };
 
 /// Enum representing whether the system is currently showing a directory listing or paths from the
@@ -104,6 +105,9 @@ pub struct App {
     /// The hotkeys registry, used to store system and entry hotkeys as well as register new ones
     /// and assign dynamically shortcuts to entries
     hotkeys_registry: HotkeysRegistry<InputMode, Action>,
+
+    /// The path to the directory index file
+    directory_index_path: PathBuf,
 }
 
 /// The search input struct, used to store the search input value and the current index.
@@ -168,6 +172,10 @@ impl Default for App {
             collected_key_combos: Vec::new(),
             last_key_press_time: None,
             hotkeys_registry: HotkeysRegistry::new_with_default_system_hotkeys(),
+            // TODO: Make this cross-platform and configurable
+            directory_index_path: env::var("HOME")
+                .map(|home| PathBuf::from(format!("{home}/{DEFAULT_INDEX_FILE_NAME}")))
+                .unwrap_or_default(),
         }
     }
 }
@@ -226,6 +234,21 @@ impl App {
         Ok(())
     }
 
+    pub fn change_to_frecent(&mut self) -> anyhow::Result<()> {
+        let directory_index = DirectoryIndex::load_from_disk(self.directory_index_path.clone())?;
+        let entries = directory_index.get_all_entries_ordered_by_rank();
+        let entry_list = EntryList::try_from(entries)?;
+
+        self.list_state = ListState::default();
+        self.should_exit = false;
+        self.list_mode = ListMode::Frecent;
+        self.entry_list = entry_list;
+        self.current_directory = env::current_dir()?;
+        self.search_input.clear();
+
+        Ok(())
+    }
+
     fn change_list_mode(&mut self, mode: ListMode) -> anyhow::Result<()> {
         if self.list_mode == mode {
             return Ok(());
@@ -235,11 +258,7 @@ impl App {
 
         match self.list_mode {
             ListMode::Directory => self.change_directory(self.current_directory.clone()),
-            ListMode::Frecent => {
-                // TODO: Fetch the most frecent paths from the database
-                self.entry_list = EntryList::default();
-                Ok(())
-            }
+            ListMode::Frecent => self.change_to_frecent(),
         }
     }
 
