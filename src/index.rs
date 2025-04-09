@@ -6,7 +6,7 @@ use std::{
     time::SystemTime,
 };
 
-pub const DEFAULT_INDEX_FILE_NAME: &str = ".tiny-fe";
+pub const DEFAULT_INDEX_FILE_NAME: &str = ".tiny-dc";
 
 #[derive(Debug)]
 pub struct DirectoryIndexEntry {

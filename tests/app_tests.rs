@@ -4,13 +4,13 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use insta::assert_snapshot;
 use ratatui::{backend::TestBackend, Terminal};
 
-use tiny_fe::app::App;
+use tiny_dc::app::App;
 
 #[test]
 fn change_directory_lists_correct_directory_entires() {
     // Create a temporary directory with a static name so that test snapshots are consistent
     let temp_dir = tempfile::Builder::new()
-        .prefix("tiny_fe")
+        .prefix("tiny_dc")
         .rand_bytes(0)
         .tempdir()
         .unwrap();
@@ -43,7 +43,7 @@ fn change_directory_lists_correct_directory_entires() {
 fn entry_hotkey_jumps_successfully() {
     // Create a temporary directory with a static name so that test snapshots are consistent
     let temp_dir = tempfile::Builder::new()
-        .prefix("tiny_fe_jump")
+        .prefix("tiny_dc_jump")
         .rand_bytes(0)
         .tempdir()
         .unwrap();
@@ -86,7 +86,7 @@ fn entry_hotkey_jumps_successfully() {
 fn entry_hotkey_missing_when_in_search_mode_and_search_input_is_empty() {
     // Create a temporary directory with a static name so that test snapshots are consistent
     let temp_dir = tempfile::Builder::new()
-        .prefix("tiny_fe_jump_search_1")
+        .prefix("tiny_dc_jump_search_1")
         .rand_bytes(0)
         .tempdir()
         .unwrap();
@@ -128,7 +128,7 @@ fn entry_hotkey_missing_when_in_search_mode_and_search_input_is_empty() {
 fn entry_hotkey_jumps_successfully_in_search_mode() {
     // Create a temporary directory with a static name so that test snapshots are consistent
     let temp_dir = tempfile::Builder::new()
-        .prefix("tiny_fe_jump_search_2")
+        .prefix("tiny_dc_jump_search_2")
         .rand_bytes(0)
         .tempdir()
         .unwrap();

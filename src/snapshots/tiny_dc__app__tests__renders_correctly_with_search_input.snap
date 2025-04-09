@@ -1,15 +1,14 @@
 ---
-source: tests/app_tests.rs
+source: src/app.rs
 expression: terminal.backend()
 snapshot_kind: text
 ---
 "                                 Tiny DC v0.1.0                                 "
-"|> /tmp/tiny_dc_jump_search_1                                                   "
+"|> /home/user                                                                   "
 "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
-"┃>sub_dir/                                                                     ┃"
-"┃ file_1_s.txt                                                                 ┃"
-"┃ file_2_s.txt                                                                 ┃"
-"┃                                                                              ┃"
-"┃                                                                              ┃"
+"┃>.git/  a                                                                     ┃"
+"┃ dir1/  s                                                                     ┃"
+"┃ .gitignore                                                                   ┃"
+"┃ Cargo.toml                                                                   ┃"
 "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
-" /                                                                              "
+" /test                                                                          "

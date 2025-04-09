@@ -577,7 +577,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tiny-fe"
+name = "tiny-dc"
 version = "0.1.0"
 dependencies = [
  "anyhow",

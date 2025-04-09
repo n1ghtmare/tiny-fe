@@ -6,7 +6,7 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
-use tiny_fe::{
+use tiny_dc::{
     app::{App, ListMode},
     index::{DirectoryIndex, DEFAULT_INDEX_FILE_NAME},
 };
@@ -19,7 +19,7 @@ struct Cli {
     directory_command: Option<DirectoryCommand>,
 }
 
-/// An optional directory sub-command, to launch into the TUI instead, use `tiny-fe` without
+/// An optional directory sub-command, to launch into the TUI instead, use `tiny-dc` without
 /// passing any args
 #[derive(Subcommand, Debug)]
 enum DirectoryCommand {

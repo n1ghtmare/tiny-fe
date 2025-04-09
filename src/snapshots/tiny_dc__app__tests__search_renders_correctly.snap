@@ -1,15 +1,14 @@
 ---
-source: tests/app_tests.rs
+source: src/app.rs
 expression: terminal.backend()
 snapshot_kind: text
 ---
 "                                 Tiny DC v0.1.0                                 "
-"|> /tmp/tiny_dc_jump_search_2/sub_dir                                           "
+"|> /home/user                                                                   "
 "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
-"┃Nothing here but digital thumbleweeds.                                        ┃"
-"┃                                                                              ┃"
-"┃                                                                              ┃"
+"┃>.git/  a                                                                     ┃"
+"┃ .gitignore                                                                   ┃"
 "┃                                                                              ┃"
 "┃                                                                              ┃"
 "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
-"Ctrl + (d)irectory │ (f)recent                                  Press ? for help"
+" /git                                                                           "

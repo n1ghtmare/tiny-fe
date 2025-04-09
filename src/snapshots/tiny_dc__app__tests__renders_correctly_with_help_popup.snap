@@ -1,0 +1,29 @@
+---
+source: src/app.rs
+expression: terminal.backend()
+snapshot_kind: text
+---
+"                                 Tiny DC v0.1.0                                 "
+"|> /home/user                                                                   "
+"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
+"┃>.git/  a                                                                     ┃"
+"┃ dir1/  s                                                                     ┃"
+"┃ .gitignore                                                                   ┃"
+"┃ Cargo.toml        ┌ Help ────────────────────────────────┐                   ┃"
+"┃                   │Key Bindings:                         │                   ┃"
+"┃                   │                                      │                   ┃"
+"┃                   │> j/k or ↓/↑ - Move down/up           │                   ┃"
+"┃                   │> gg/G or Home/End - Go to top/bottom │                   ┃"
+"┃                   │> Ctrl + d/r - Switch category        │                   ┃"
+"┃                   │(d)irectory or (f)recent              │                   ┃"
+"┃                   │> Enter, l or → - Go into directory   │                   ┃"
+"┃                   │> h or ← - Go up a directory          │                   ┃"
+"┃                   │> ? - Toggle help                     │                   ┃"
+"┃                   │> q or Esc - Quit                     │                   ┃"
+"┃                   └──────────────────────────────────────┘                   ┃"
+"┃                                                                              ┃"
+"┃                                                                              ┃"
+"┃                                                                              ┃"
+"┃                                                                              ┃"
+"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
+"Ctrl + (d)irectory │ (f)recent                                  Press ? for help"

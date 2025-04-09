@@ -4,12 +4,12 @@ use std::{
     path::PathBuf,
 };
 
-use tiny_fe::index::DirectoryIndex;
+use tiny_dc::index::DirectoryIndex;
 
 #[test]
 fn directory_index_find_top_ranked_returns_correct_result() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let index_file_path = temp_dir.path().join(".tiny-fe");
+    let index_file_path = temp_dir.path().join(".tiny-dc");
 
     let mut file = File::create(&index_file_path).unwrap();
 
@@ -33,7 +33,7 @@ fn directory_index_find_top_ranked_returns_correct_result() {
 #[test]
 fn directory_index_find_top_ranked_returns_none_for_no_match() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let index_file_path = temp_dir.path().join(".tiny-fe");
+    let index_file_path = temp_dir.path().join(".tiny-dc");
 
     let mut file = File::create(&index_file_path).unwrap();
 
@@ -57,7 +57,7 @@ fn directory_index_find_top_ranked_returns_none_for_no_match() {
 #[test]
 fn directory_index_find_top_ranked_returns_none_for_empty_index() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let index_file_path = temp_dir.path().join(".tiny-fe");
+    let index_file_path = temp_dir.path().join(".tiny-dc");
 
     let directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
     let result = directory_index.find_top_ranked("nonexistent");
@@ -68,7 +68,7 @@ fn directory_index_find_top_ranked_returns_none_for_empty_index() {
 #[test]
 fn directory_index_push_creates_a_new_entry() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let index_file_path = temp_dir.path().join(".tiny-fe");
+    let index_file_path = temp_dir.path().join(".tiny-dc");
 
     let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
 
@@ -98,7 +98,7 @@ fn directory_index_push_creates_a_new_entry() {
 #[test]
 fn directory_index_push_multiple_times_updates_entry_rank() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let index_file_path = temp_dir.path().join(".tiny-fe");
+    let index_file_path = temp_dir.path().join(".tiny-dc");
 
     let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
 
@@ -134,7 +134,7 @@ fn directory_index_push_multiple_times_updates_entry_rank() {
 #[test]
 fn directory_index_find_top_ranked_returns_common_parent() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let index_file_path = temp_dir.path().join(".tiny-fe");
+    let index_file_path = temp_dir.path().join(".tiny-dc");
 
     let mut file = File::create(&index_file_path).unwrap();
 

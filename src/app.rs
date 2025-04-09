@@ -610,7 +610,7 @@ impl App {
         let app_version = env!("CARGO_PKG_VERSION");
 
         let line = Line::from(vec![
-            Span::styled("Tiny FE", Style::default().bold()),
+            Span::styled("Tiny DC", Style::default().bold()),
             Span::styled(format!(" v{}", app_version), Style::default().dark_gray()),
         ]);
 
