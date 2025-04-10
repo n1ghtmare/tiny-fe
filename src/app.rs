@@ -13,7 +13,7 @@ use symbols::border;
 use crate::{
     entry::{EntryKind, EntryList, EntryRenderData},
     hotkeys::{HotkeysRegistry, KeyCombo, PREFERRED_KEY_COMBOS_IN_ORDER},
-    index::{DirectoryIndex, DEFAULT_INDEX_FILE_NAME},
+    index::DirectoryIndex,
 };
 
 /// Enum representing whether the system is currently showing a directory listing or paths from the
@@ -107,7 +107,7 @@ pub struct App {
     hotkeys_registry: HotkeysRegistry<InputMode, Action>,
 
     /// The path to the directory index file
-    directory_index_path: PathBuf,
+    directory_index: DirectoryIndex,
 }
 
 /// The search input struct, used to store the search input value and the current index.
@@ -172,10 +172,7 @@ impl Default for App {
             collected_key_combos: Vec::new(),
             last_key_press_time: None,
             hotkeys_registry: HotkeysRegistry::new_with_default_system_hotkeys(),
-            // TODO: Make this cross-platform and configurable
-            directory_index_path: env::var("HOME")
-                .map(|home| PathBuf::from(format!("{home}/{DEFAULT_INDEX_FILE_NAME}")))
-                .unwrap_or_default(),
+            directory_index: DirectoryIndex::default(),
         }
     }
 }
@@ -185,17 +182,21 @@ impl App {
     const INACTIVITY_TIMEOUT: Duration = Duration::from_millis(500);
 
     /// Tries to create a new instance of the application in a given list mode.
-    pub fn try_new(mode: ListMode) -> anyhow::Result<Self> {
+    pub fn try_new(mode: ListMode, directory_index: DirectoryIndex) -> anyhow::Result<Self> {
         let path = env::current_dir()?;
 
         match mode {
             ListMode::Directory => {
-                let mut app = App::default();
+                let mut app = App {
+                    directory_index,
+                    ..Default::default()
+                };
                 app.change_directory(path)?;
                 Ok(app)
             }
             ListMode::Frecent => {
                 let mut app = App {
+                    directory_index,
                     list_mode: ListMode::Frecent,
                     ..Default::default()
                 };
@@ -235,8 +236,7 @@ impl App {
     }
 
     pub fn change_to_frecent(&mut self) -> anyhow::Result<()> {
-        let directory_index = DirectoryIndex::load_from_disk(self.directory_index_path.clone())?;
-        let entries = directory_index.get_all_entries_ordered_by_rank();
+        let entries = self.directory_index.get_all_entries_ordered_by_rank();
         let entry_list = EntryList::try_from(entries)?;
 
         self.list_state = ListState::default();

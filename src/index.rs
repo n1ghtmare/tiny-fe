@@ -50,6 +50,7 @@ impl DirectoryIndexEntry {
     }
 }
 
+#[derive(Debug, Default)]
 pub struct DirectoryIndex {
     path: PathBuf,
     data: HashMap<PathBuf, DirectoryIndexEntry>,
@@ -118,6 +119,10 @@ impl DirectoryIndex {
             let entry = DirectoryIndexEntry::new();
             self.data.insert(path.clone(), entry);
         }
+    }
+
+    pub fn remove_entry(&mut self, path: &PathBuf) {
+        self.data.remove(path);
     }
 
     pub fn find_top_ranked(&self, query: &str) -> Option<PathBuf> {

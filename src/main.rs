@@ -15,6 +15,10 @@ use tiny_dc::{
 #[command(version, about, long_about = None)]
 #[command(propagate_version = true)]
 struct Cli {
+    /// Path to the index file, if not provided, the default is $HOME/.tiny-dc
+    #[arg(short, long, global = true, value_name = "FILE_PATH")]
+    index_file: Option<PathBuf>,
+
     #[command(subcommand)]
     directory_command: Option<DirectoryCommand>,
 }
@@ -33,29 +37,45 @@ enum DirectoryCommand {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    let index_file_path = match cli.index_file {
+        Some(path) => path,
+        None => {
+            // TODO: Make this cross platform, this won't work on Windows and needs testing on MacOS
+            let home_dir = env::var("HOME")?;
+            let index_file_path = format!("{home_dir}/{DEFAULT_INDEX_FILE_NAME}");
+            PathBuf::from(index_file_path)
+        }
+    };
+    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path)?;
+
     if let Some(directory_command) = cli.directory_command {
-        // TODO: Make this cross platform, this won't work on Windows the way it is
-        let home_dir = env::var("HOME")?;
-
-        let index_file_path = format!("{home_dir}/{DEFAULT_INDEX_FILE_NAME}");
-        let mut directory_index = DirectoryIndex::load_from_disk(PathBuf::from(index_file_path))?;
-
         match directory_command {
             DirectoryCommand::Push { path } => {
+                // TODO: Write an integration test for this scenario
                 directory_index.push_entry(&path);
             }
             DirectoryCommand::Z { query } => {
-                let result = directory_index.find_top_ranked(&query);
-                if let Some(path) = result {
+                // TODO: Write an integration test for this scenario
+                while let Some(path) = directory_index.find_top_ranked(&query) {
+                    // Make sure the directory exists, if it doesn't we don't want to print it, we
+                    // want to remove it from the index instead
+                    if !path.exists() {
+                        println!("will remove {}", path.display());
+                        directory_index.remove_entry(&path);
+                        continue;
+                    }
+
                     println!("{}", path.display());
-                } else {
-                    let current_dir = env::current_dir()?;
-                    println!("{}", current_dir.display());
+                    directory_index.save_to_disk()?;
+                    return Ok(());
                 }
+
+                // If we didn't find any matches, we want to print the current directory
+                let current_dir = env::current_dir()?;
+                println!("{}", current_dir.display());
+                directory_index.save_to_disk()?;
             }
         }
-
-        directory_index.save_to_disk()?;
     } else {
         // Enter the alternate screen and hide the cursor
         execute!(io::stderr(), EnterAlternateScreen)?;
@@ -64,7 +84,7 @@ fn main() -> anyhow::Result<()> {
         // Enable raw mode
         terminal::enable_raw_mode()?;
 
-        let result = run_app_ui();
+        let result = run_app_ui(directory_index);
 
         // Restore the terminal state
         terminal::disable_raw_mode()?;
@@ -86,8 +106,8 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_app_ui() -> anyhow::Result<PathBuf> {
-    let mut app = App::try_new(ListMode::default())?;
+fn run_app_ui(directory_index: DirectoryIndex) -> anyhow::Result<PathBuf> {
+    let mut app = App::try_new(ListMode::default(), directory_index)?;
 
     // Initialize the terminal backend
     let backend = ratatui::backend::CrosstermBackend::new(io::stderr());
