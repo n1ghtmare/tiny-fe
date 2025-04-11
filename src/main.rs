@@ -52,28 +52,16 @@ fn main() -> anyhow::Result<()> {
         match directory_command {
             DirectoryCommand::Push { path } => {
                 // TODO: Write an integration test for this scenario
-                directory_index.push_entry(&path);
+                directory_index.push(path)?;
             }
             DirectoryCommand::Z { query } => {
-                // TODO: Write an integration test for this scenario
-                while let Some(path) = directory_index.find_top_ranked(&query) {
-                    // Make sure the directory exists, if it doesn't we don't want to print it, we
-                    // want to remove it from the index instead
-                    if !path.exists() {
-                        println!("will remove {}", path.display());
-                        directory_index.remove_entry(&path);
-                        continue;
-                    }
-
+                if let Some(path) = directory_index.z(&query)? {
                     println!("{}", path.display());
-                    directory_index.save_to_disk()?;
-                    return Ok(());
+                } else {
+                    // If we didn't find any matches, we want to print the current directory
+                    let current_dir = env::current_dir()?;
+                    println!("{}", current_dir.display());
                 }
-
-                // If we didn't find any matches, we want to print the current directory
-                let current_dir = env::current_dir()?;
-                println!("{}", current_dir.display());
-                directory_index.save_to_disk()?;
             }
         }
     } else {
