@@ -46,7 +46,7 @@ fn main() -> anyhow::Result<()> {
             PathBuf::from(index_file_path)
         }
     };
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path)?;
+    let mut directory_index = DirectoryIndex::try_from(index_file_path)?;
 
     if let Some(directory_command) = cli.directory_command {
         match directory_command {

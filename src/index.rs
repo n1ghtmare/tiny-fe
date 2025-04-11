@@ -74,7 +74,7 @@ pub struct DirectoryIndex {
 
 impl DirectoryIndex {
     /// Reads the index from disk, if it doesn't exist, creates a new one
-    pub fn load_from_disk(path: PathBuf) -> anyhow::Result<Self> {
+    pub fn try_from(path: PathBuf) -> anyhow::Result<Self> {
         let file = if path.exists() {
             // Open the file if it exists
             File::open(&path)?
@@ -109,12 +109,7 @@ impl DirectoryIndex {
         Ok(DirectoryIndex { path, data })
     }
 
-    /// Saves the index to disk in the following format:
-    ///
-    /// ```text
-    /// <path>|<rank>|<last_accessed>
-    ///```
-    pub fn save_to_disk(&self) -> anyhow::Result<()> {
+    fn save_to_disk(&self) -> anyhow::Result<()> {
         // Save the index to disk
         let file = File::create(self.path.clone())?;
         let mut writer = BufWriter::new(file);

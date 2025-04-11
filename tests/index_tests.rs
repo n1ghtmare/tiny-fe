@@ -36,7 +36,7 @@ fn directory_index_z_returns_correct_result() {
         writeln!(file, "{}|{}|{}\n", line.0, line.1, line.2).unwrap();
     }
 
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     let result = directory_index.z("test").unwrap();
 
     assert_eq!(result, Some(temp_test_dir_other.to_str().unwrap().into()));
@@ -75,7 +75,7 @@ fn directory_index_z_returns_existing_path_only() {
         writeln!(file, "{}|{}|{}\n", line.0, line.1, line.2).unwrap();
     }
 
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     let result = directory_index.z("test").unwrap();
 
     assert_eq!(result, Some(temp_test_dir.to_str().unwrap().into()));
@@ -111,7 +111,7 @@ fn directory_index_z_returns_none_for_no_match() {
         writeln!(file, "{}|{}|{}\n", line.0, line.1, line.2).unwrap();
     }
 
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     let result = directory_index.z("non-existent").unwrap();
 
     assert_eq!(result, None);
@@ -148,7 +148,7 @@ fn directory_index_z_returns_correct_result_for_common_parent() {
     }
 
     // Load the index and query for the common parent.
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     let result = directory_index.z("common").unwrap();
 
     // Assert that the common parent is returned even if a subdirectory has a higher rank.
@@ -160,7 +160,7 @@ fn directory_index_z_returns_none_for_empty_index() {
     let temp_dir = tempfile::tempdir().unwrap();
     let index_file_path = temp_dir.path().join(".tiny-dc");
 
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     let result = directory_index.z("nonexistent").unwrap();
 
     assert_eq!(result, None);
@@ -176,7 +176,7 @@ fn directory_index_push_creates_index_file() {
     std::fs::create_dir_all(&temp_test_dir).unwrap();
 
     // Create a new DirectoryIndex and push an entry.
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     directory_index.push(temp_test_dir.clone()).unwrap();
 
     // Check if the index file was created
@@ -207,7 +207,7 @@ fn directory_index_push_multiple_times_updates_entry_rank() {
     let temp_test_dir = temp_dir.path().join("test_dir");
     std::fs::create_dir_all(&temp_test_dir).unwrap();
 
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     directory_index.push(temp_test_dir.clone()).unwrap();
 
     let lines = get_index_file_lines(&index_file_path);
@@ -219,7 +219,7 @@ fn directory_index_push_multiple_times_updates_entry_rank() {
     assert_eq!(parts[1], "0");
 
     // Push the entry second time
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     directory_index.push(temp_test_dir.clone()).unwrap();
 
     let lines = get_index_file_lines(&index_file_path);
@@ -232,7 +232,7 @@ fn directory_index_push_multiple_times_updates_entry_rank() {
     assert_eq!(parts[1], "1");
 
     // Push the entry third time
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     directory_index.push(temp_test_dir.clone()).unwrap();
 
     let lines = get_index_file_lines(&index_file_path);
@@ -251,7 +251,7 @@ fn directory_index_push_non_existent_path_does_is_a_no_op() {
     let index_file_path = temp_dir.path().join(".tiny-dc");
 
     // Create a new DirectoryIndex and push a non-existent entry.
-    let mut directory_index = DirectoryIndex::load_from_disk(index_file_path.clone()).unwrap();
+    let mut directory_index = DirectoryIndex::try_from(index_file_path.clone()).unwrap();
     directory_index
         .push(PathBuf::from("/non/existent/path"))
         .unwrap();
