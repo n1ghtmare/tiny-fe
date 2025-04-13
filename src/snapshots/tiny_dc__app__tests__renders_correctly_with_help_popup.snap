@@ -14,7 +14,7 @@ snapshot_kind: text
 "┃                   │                                      │                   ┃"
 "┃                   │> j/k or ↓/↑ - Move down/up           │                   ┃"
 "┃                   │> gg/G or Home/End - Go to top/bottom │                   ┃"
-"┃                   │> Ctrl + d/r - Switch category        │                   ┃"
+"┃                   │> Ctrl + d/f - Switch category        │                   ┃"
 "┃                   │(d)irectory or (f)recent              │                   ┃"
 "┃                   │> Enter, l or → - Go into directory   │                   ┃"
 "┃                   │> h or ← - Go up a directory          │                   ┃"

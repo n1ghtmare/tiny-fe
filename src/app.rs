@@ -310,7 +310,7 @@ impl App {
                 Span::raw(" - Go to top/bottom"),
             ]),
             Line::from(vec![
-                Span::styled("> Ctrl + d/r", Style::default().fg(Color::Yellow)),
+                Span::styled("> Ctrl + d/f", Style::default().fg(Color::Yellow)),
                 Span::raw(" - Switch category (d)irectory or (f)recent"),
             ]),
             Line::from(vec![
