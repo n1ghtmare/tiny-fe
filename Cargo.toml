@@ -2,6 +2,12 @@
 name = "tiny-dc"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "A tiny but mighty TUI directory changer"
+repository = "https://github.com/n1ghtmare/tiny-dc"
+readme = "README.md"
+keywords = ["tui", "terminal", "directory", "changer", "cli"]
+categories = ["command-line-utilities"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
