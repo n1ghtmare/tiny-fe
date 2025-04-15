@@ -42,7 +42,7 @@ Install from cargo:
 cargo install tiny-dc
 ```
 
-### Step 2: Then to integrate it with your shell
+### Step 2: Integrate it with your shell
 
 For `bash` or `zsh`, add the following to your `~/.bashrc` or `~/.zshrc`:
 
