@@ -232,8 +232,18 @@ impl TryFrom<ReadDir> for EntryList {
 
         for dir_entry_result in value.into_iter() {
             let dir_entry = dir_entry_result?;
-            let item = Entry::try_from(dir_entry)?;
-            items.push(item);
+            let result = Entry::try_from(dir_entry);
+
+            match result {
+                Ok(item) => items.push(item),
+                Err(_) => {
+                    // Skip the entry if it can't be converted to an Entry
+                    //
+                    // This is useful for example when the entry is a symlink to a file that
+                    // doesn't exist
+                    continue;
+                }
+            }
         }
 
         Ok(EntryList {

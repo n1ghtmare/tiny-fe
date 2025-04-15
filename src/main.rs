@@ -51,7 +51,6 @@ fn main() -> anyhow::Result<()> {
     if let Some(directory_command) = cli.directory_command {
         match directory_command {
             DirectoryCommand::Push { path } => {
-                // TODO: Write an integration test for this scenario
                 directory_index.push(path)?;
             }
             DirectoryCommand::Z { query } => {
