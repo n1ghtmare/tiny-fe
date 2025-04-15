@@ -30,6 +30,72 @@ well. Windows support is still work in progress (PRs are welcome).
       key/key combination on the right side of the directory name and you will
       be taken to that directory)
 
-## Installation
+## Setup
 
-TODO
+In order to use `tiny-dc`, you need to install it and then integrate it with your shell.
+
+### Step 1: Install `tiny-dc`
+
+Install from cargo:
+
+```bash
+cargo install tiny-dc
+```
+
+### Step 2: Then to integrate it with your shell
+
+For `bash` or `zsh`, add the following to your `~/.bashrc` or `~/.zshrc`:
+
+```bash
+# Change dc to whatever you want to use
+dc() {
+    local result=$(command tiny-dc "$@")
+    [ -n "$result" ] && cd -- "$result"
+}
+
+# Change z to whatever you want to use
+# This will allow you to use z as a shortcut for tiny-dc
+# It will take you to the most "frecent" directory that you've visited before
+z() {
+    local result=$(command tiny-dc z "$@")
+    [ -n "$result" ] && cd -- "$result"
+}
+
+# This is needed for the `z` command to work
+# Every time you change directories, it will push the current directory to the
+# tiny-dc index
+cd() {
+    builtin cd "$@" && tiny-dc push "$PWD"
+}
+```
+
+After adding the above lines, run `source ~/.bashrc` or `source ~/.zshrc` to
+reload your shell configuration.
+
+### Step 3: Profit
+
+Now you can use `dc` to open the TUI and navigate through your directories. You can
+also use `z` to quickly jump to the most "frecent" directory.
+
+
+## Keybindings
+
+At any given time when using `tiny-dc`, you can press `?` to see the help menu,
+which will show you the keybindings that are available.
+
+Here is a list of keybindings that you can use in the TUI:
+
+| Keybinding | Action |
+|------------|--------|
+| `h` or `←`            | Go to the parent directory |
+| `l` or `→` or `Enter` | Go to the selected directory |
+| `j` or `↓`            | Move down one line |
+| `k` or `↑`            | Move up one line |
+| `gg` or `Home`        | Go to the top of the list |
+| `G` or `End`          | Go to the bottom of the list |
+| `?`                   | Show help menu |
+| `q` or `Esc`          | Quit |
+| `/`                   | Search for a directory |
+| `_`                   | Clear search |
+| `Ctrl + f`            | Switch to frecent category |
+| `Ctrl + d`            | Switch to directories category |
