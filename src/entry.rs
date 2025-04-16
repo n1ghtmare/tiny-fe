@@ -260,8 +260,17 @@ impl TryFrom<Vec<PathBuf>> for EntryList {
         let mut items = Vec::new();
 
         for path in value {
-            let item = Entry::try_from(path)?;
-            items.push(item);
+            let result = Entry::try_from(path);
+            match result {
+                Ok(item) => items.push(item),
+                Err(_) => {
+                    // Skip the entry if it can't be converted to an Entry
+                    //
+                    // This is useful for example when the entry is a symlink to a file that
+                    // doesn't exist
+                    continue;
+                }
+            }
         }
 
         Ok(EntryList {
